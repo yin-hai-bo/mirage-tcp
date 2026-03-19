@@ -45,6 +45,7 @@
 - 当前阶段，应优先保证本地终止路径的正确性，而不是广泛覆盖 TCP 特性。
 - 对外和热路径上的“成功/失败”接口统一使用 `int error code`，`0` 表示成功；不要用 `bool` 表示是否成功。
 - 不要为错误返回设计 `std::string` 或 message out 参数；调用方应基于错误码枚举处理。
+- 所有公共错误码集中定义在一个位置；不要再按模块分散声明多组错误码枚举。
 - `MirageTcpCallbacks::on_error` 只传 `int error_code`。
 - `TcpConnection::ConnectionEvent` 只使用 `event_code` 表达错误或关闭原因，不携带 message 字符串。
 
@@ -70,3 +71,4 @@
 
 - 保持 `README.md` 与实际支持行为一致。
 - 记录每一个会影响集成预期、且被有意不支持的 TCP/IP 行为。
+

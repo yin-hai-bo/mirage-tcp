@@ -6,6 +6,7 @@
 
 #include <vector>
 
+#include "mirage_tcp/error_code.h"
 #include "mirage_tcp/tcp_segment.h"
 
 namespace mirage_tcp {
@@ -37,25 +38,6 @@ enum class ConnectionEventType {
     kError
 };
 
-enum TcpConnectionErrorCode {
-    kTcpConnectionOk = 0,
-    kTcpConnectionConnectInvalidState = 1,
-    kTcpConnectionWriteInvalidState = 2,
-    kTcpConnectionWriteAfterClose = 3,
-    kTcpConnectionCloseInvalidState = 4,
-    kTcpConnectionPeerMismatch = 5,
-    kTcpConnectionClosedState = 6,
-    kTcpConnectionUnhandledState = 7,
-    kTcpConnectionSynAckExpected = 8,
-    kTcpConnectionAckUnexpected = 9,
-    kTcpConnectionPayloadOutOfOrder = 10,
-    kTcpConnectionFinSequenceUnexpected = 11,
-    kTcpConnectionSegmentParseFailed = 12,
-    kTcpConnectionClosedByReset = 13,
-    kTcpConnectionClosedByPeerFin = 14,
-    kTcpConnectionTimeWaitExpired = 15
-};
-
 /**
  * @brief One serialized outbound TCP segment with its parsed fields.
  */
@@ -71,7 +53,7 @@ struct ConnectionEvent {
     ConnectionEventType type;
     TcpState state;
     std::vector<uint8_t> data;
-    int event_code;
+    error_code_t event_code;
 };
 
 /**
@@ -97,7 +79,7 @@ public:
      * @param remote_port Peer TCP port.
      * @return 0 if the connect attempt is started; otherwise an error code.
      */
-    int connect(uint16_t remote_port);
+    error_code_t connect(uint16_t remote_port);
 
     /**
      * @brief Queues payload for transmission on an established connection.
@@ -105,14 +87,14 @@ public:
      * @param data Payload bytes to send.
      * @return 0 if the payload is accepted; otherwise an error code.
      */
-    int write(const std::vector<uint8_t>& data);
+    error_code_t write(const std::vector<uint8_t>& data);
 
     /**
      * @brief Starts a local close when allowed by the current state.
      *
      * @return 0 if close processing is started; otherwise an error code.
      */
-    int close();
+    error_code_t close();
 
     /**
      * @brief Pushes one parsed inbound TCP segment into the state machine.
@@ -120,7 +102,7 @@ public:
      * @param segment Parsed TCP segment from the peer.
      * @return 0 if the segment is accepted; otherwise an error code.
      */
-    int push_incoming_segment(const TcpSegment& segment);
+    error_code_t push_incoming_segment(const TcpSegment& segment);
 
     /**
      * @brief Parses and pushes one inbound TCP segment.
@@ -128,7 +110,7 @@ public:
      * @param bytes Raw TCP segment bytes.
      * @return 0 if the bytes are accepted; otherwise an error code.
      */
-    int push_incoming_bytes(const std::vector<uint8_t>& bytes);
+    error_code_t push_incoming_bytes(const std::vector<uint8_t>& bytes);
 
     /**
      * @brief Advances timer-driven state such as TIME-WAIT expiration.
@@ -172,9 +154,9 @@ private:
 
     void set_state(TcpState new_state);
 
-    void emit_error(int error_code);
+    void emit_error(error_code_t error_code);
 
-    void emit_closed(int event_code);
+    void emit_closed(error_code_t event_code);
 
     void queue_segment(const TcpSegment& segment);
 
@@ -190,17 +172,17 @@ private:
 
     bool matches_peer(const TcpSegment& segment) const;
 
-    int handle_reset();
+    error_code_t handle_reset();
 
-    int handle_syn_sent(const TcpSegment& segment);
+    error_code_t handle_syn_sent(const TcpSegment& segment);
 
-    int handle_established(const TcpSegment& segment);
+    error_code_t handle_established(const TcpSegment& segment);
 
-    int handle_fin_wait_1(const TcpSegment& segment);
+    error_code_t handle_fin_wait_1(const TcpSegment& segment);
 
-    int handle_fin_wait_2(const TcpSegment& segment);
+    error_code_t handle_fin_wait_2(const TcpSegment& segment);
 
-    int handle_closing(const TcpSegment& segment);
+    error_code_t handle_closing(const TcpSegment& segment);
 
     void enter_time_wait();
 
@@ -235,3 +217,4 @@ const char* to_string(TcpState state);
 }  // namespace mirage_tcp
 
 #endif
+

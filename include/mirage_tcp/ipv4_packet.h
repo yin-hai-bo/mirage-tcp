@@ -4,8 +4,9 @@
 #include <cstddef>
 #include <cstdint>
 
-#include <string>
 #include <vector>
+
+#include "mirage_tcp/error_code.h"
 
 namespace mirage_tcp {
 
@@ -29,17 +30,6 @@ struct Ipv4Packet {
     std::vector<uint8_t> payload;
 
     Ipv4Packet();
-};
-
-enum Ipv4PacketErrorCode {
-    kIpv4PacketOk = 0,
-    kIpv4PacketNullPointer = 1,
-    kIpv4PacketTooShort = 2,
-    kIpv4PacketUnsupportedVersion = 3,
-    kIpv4PacketInvalidHeaderLength = 4,
-    kIpv4PacketInvalidTotalLength = 5,
-    kIpv4PacketFragmentUnsupported = 6,
-    kIpv4PacketSerializeTooLarge = 7
 };
 
 /**
@@ -69,3 +59,4 @@ int serialize_ipv4_packet(
 }  // namespace mirage_tcp
 
 #endif
+

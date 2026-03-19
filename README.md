@@ -16,17 +16,15 @@
   `client_ip` / `server_ip` 使用内部 `Address union` 保存 `in_addr` 或 `in6_addr`，
   `ip_ver` 使用 `4` 或 `6` 标识当前地址族。
 - 当前实现仍然只处理 `IPv4/TCP`，但公共连接标识已经按双栈形式预留。
-- `handle_incoming_ip_packet(...)`、`send_downstream_tcp_payload(...)`、`close_flow(...)` 返回 `int error code`，`0` 表示成功。
-- `MirageTcpCallbacks::on_error` 只上报 `int error_code`。
+- `handle_incoming_ip_packet(...)`、`send_downstream_tcp_payload(...)`、`close_flow(...)` 返回 `error_code_t`，底层类型为 `int`，`0` 表示成功。
+- `MirageTcpCallbacks::on_error` 只上报 `error_code_t error_code`。
 
 ## 错误处理约定
 
-- `kMirageTcpOk`、`kIpv4PacketOk`、`kTcpSegmentOk`、`kTcpConnectionOk` 都表示成功。
-- 失败时，调用方应按对应模块的错误码枚举处理，而不是依赖字符串匹配。
-- `MirageTcp` 的对外操作错误码定义在 `MirageTcpErrorCode`。
-- `IPv4 packet` 解析与序列化错误码定义在 `Ipv4PacketErrorCode`。
-- `TCP segment` 解析错误码定义在 `TcpSegmentErrorCode`。
-- `TcpConnection` 的状态机错误与关闭原因定义在 `TcpConnectionErrorCode`。
+- `ErrorCode::Ok` 表示成功。
+- 失败时，调用方应按统一的 `ErrorCode` 枚举处理，而不是依赖字符串匹配。
+- 所有公共错误码统一定义在 `include/mirage_tcp/error_code.h`。
+- 调用方统一使用 `ErrorCode::...` 形式判断结果，例如 `ErrorCode::FlowNotFound`、`ErrorCode::ProtocolUnsupported`。
 
 ## v1 已支持
 
@@ -74,9 +72,9 @@ callbacks.on_tcp_connection_reset = my_reset_callback;
 callbacks.on_error = my_error_code_callback;
 
 mirage_tcp::MirageTcp mirage_tcp(callbacks);
-int result = mirage_tcp.handle_incoming_ip_packet(ip_packet, ip_packet_size);
+mirage_tcp::error_code_t result = mirage_tcp.handle_incoming_ip_packet(ip_packet, ip_packet_size);
 
-if (result != mirage_tcp::kMirageTcpOk) {
+if (result != mirage_tcp::ErrorCode::Ok) {
     // 按 error code 处理错误。
 }
 
@@ -86,3 +84,4 @@ mirage_tcp.close_flow(connection_info);
 ```
 
 完整示例见 `examples/basic_client.cpp`。
+

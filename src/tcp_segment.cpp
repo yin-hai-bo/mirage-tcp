@@ -46,21 +46,21 @@ int parse_tcp_segment(
     const std::vector<uint8_t>& bytes,
     TcpSegment* segment) {
     if (segment == NULL) {
-        return kTcpSegmentNullPointer;
+        return ErrorCode::InvalidArgument;
     }
 
     if (bytes.size() < 20) {
-        return kTcpSegmentTooShort;
+        return ErrorCode::PacketTooShort;
     }
 
     const uint8_t data_offset_words = static_cast<uint8_t>(bytes[12] >> 4);
     if (data_offset_words < 5) {
-        return kTcpSegmentInvalidDataOffset;
+        return ErrorCode::InvalidTcpDataOffset;
     }
 
     const size_t header_length = static_cast<size_t>(data_offset_words) * 4U;
     if (header_length > bytes.size()) {
-        return kTcpSegmentHeaderTooLong;
+        return ErrorCode::TcpHeaderTooLong;
     }
 
     TcpSegment parsed;
@@ -78,7 +78,7 @@ int parse_tcp_segment(
 
     parsed.payload.assign(bytes.begin() + static_cast<std::ptrdiff_t>(header_length), bytes.end());
     *segment = parsed;
-    return kTcpSegmentOk;
+    return ErrorCode::Ok;
 }
 
 std::vector<uint8_t> serialize_tcp_segment(const TcpSegment& segment) {
@@ -118,3 +118,4 @@ std::vector<uint8_t> serialize_tcp_segment(const TcpSegment& segment) {
 }
 
 }  // namespace mirage_tcp
+

@@ -13,6 +13,8 @@
 #include <netinet/in.h>
 #endif
 
+#include "mirage_tcp/error_code.h"
+
 namespace mirage_tcp {
 
 using std::size_t;
@@ -74,28 +76,7 @@ typedef void (*TcpConnectionResetCallback)(
 
 typedef void (*MirageTcpErrorCallback)(
     void* user_data,
-    int error_code);
-
-enum MirageTcpErrorCode {
-    kMirageTcpOk = 0,
-    kMirageTcpIpv4ParseFailed = 1,
-    kMirageTcpProtocolUnsupported = 2,
-    kMirageTcpTcpParseFailed = 3,
-    kMirageTcpHandshakeFinalAckExpected = 4,
-    kMirageTcpHandshakeClientSequenceUnexpected = 5,
-    kMirageTcpFlowNotFound = 6,
-    kMirageTcpFlowAlreadyExists = 7,
-    kMirageTcpEstablishedAckRequired = 8,
-    kMirageTcpEstablishedAckNumberUnexpected = 9,
-    kMirageTcpEstablishedSequenceUnexpected = 10,
-    kMirageTcpCloseFinalAckExpected = 11,
-    kMirageTcpCloseAckUnexpected = 12,
-    kMirageTcpDownstreamPayloadEmpty = 13,
-    kMirageTcpIpv4OnlyOperation = 14,
-    kMirageTcpSendBeforeEstablished = 15,
-    kMirageTcpCloseBeforeEstablished = 16,
-    kMirageTcpPacketEmitFailed = 17
-};
+    error_code_t error_code);
 
 /**
  * @brief Host-provided callbacks used to observe MirageTCP output.
@@ -137,7 +118,7 @@ public:
      * @param ip_packet_size Size of @p ip_packet in bytes.
      * @return 0 if the packet is accepted; otherwise an error code.
      */
-    int handle_incoming_ip_packet(const void* ip_packet, size_t ip_packet_size);
+    error_code_t handle_incoming_ip_packet(const void* ip_packet, size_t ip_packet_size);
 
     /**
      * @brief Emits one downstream TCP payload segment on an established flow.
@@ -147,7 +128,7 @@ public:
      * @param payload_size Size of @p payload in bytes.
      * @return 0 if the payload is emitted; otherwise an error code.
      */
-    int send_downstream_tcp_payload(
+    error_code_t send_downstream_tcp_payload(
         const ConnectionInfo& connection_info,
         const void* payload,
         size_t payload_size);
@@ -158,7 +139,7 @@ public:
      * @param connection_info Flow identifier.
      * @return 0 if close initiation succeeds; otherwise an error code.
      */
-    int close_flow(const ConnectionInfo& connection_info);
+    error_code_t close_flow(const ConnectionInfo& connection_info);
 
 private:
     enum class FlowState {
@@ -175,15 +156,15 @@ private:
         uint32_t server_next_sequence;
     };
 
-    void emit_error(int error_code) const;
+    void emit_error(error_code_t error_code) const;
 
     void emit_downstream_ip_packet(const void* ip_packet, size_t ip_packet_size) const;
 
     void emit_reset(const ConnectionInfo& connection_info) const;
 
-    int handle_syn(const ConnectionInfo& connection_info, uint32_t client_sequence);
+    error_code_t handle_syn(const ConnectionInfo& connection_info, uint32_t client_sequence);
 
-    int handle_established_packet(
+    error_code_t handle_established_packet(
         Flow* flow,
         uint32_t sequence_number,
         uint32_t acknowledgment_number,
@@ -193,12 +174,12 @@ private:
         const void* payload,
         size_t payload_size);
 
-    int handle_last_ack_packet(
+    error_code_t handle_last_ack_packet(
         Flow* flow,
         uint32_t acknowledgment_number,
         bool ack_flag);
 
-    int emit_reset_for_unhandled_packet(
+    error_code_t emit_reset_for_unhandled_packet(
         const ConnectionInfo& connection_info,
         uint32_t sequence_number,
         uint32_t acknowledgment_number,
@@ -207,9 +188,9 @@ private:
         bool fin_flag,
         size_t payload_size);
 
-    int fail_flow(
+    error_code_t fail_flow(
         const ConnectionInfo& connection_info,
-        int error_code,
+        error_code_t error_code,
         uint32_t sequence_number,
         uint32_t acknowledgment_number,
         bool ack_flag,
@@ -217,7 +198,7 @@ private:
         bool fin_flag,
         size_t payload_size);
 
-    int emit_tcp_response(
+    error_code_t emit_tcp_response(
         const ConnectionInfo& connection_info,
         uint32_t sequence_number,
         uint32_t acknowledgment_number,
@@ -235,3 +216,4 @@ private:
 }  // namespace mirage_tcp
 
 #endif
+

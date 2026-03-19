@@ -5,6 +5,8 @@
 
 #include <vector>
 
+#include "mirage_tcp/error_code.h"
+
 namespace mirage_tcp {
 
 using std::uint8_t;
@@ -39,14 +41,6 @@ struct TcpSegment {
     TcpSegment();
 };
 
-enum TcpSegmentErrorCode {
-    kTcpSegmentOk = 0,
-    kTcpSegmentNullPointer = 1,
-    kTcpSegmentTooShort = 2,
-    kTcpSegmentInvalidDataOffset = 3,
-    kTcpSegmentHeaderTooLong = 4
-};
-
 /**
  * @brief Parses one TCP segment without options.
  *
@@ -69,3 +63,4 @@ std::vector<uint8_t> serialize_tcp_segment(const TcpSegment& segment);
 }  // namespace mirage_tcp
 
 #endif
+
