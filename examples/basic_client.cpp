@@ -18,12 +18,12 @@ void on_downstream_ip_packet_generated(void* user_data, const void* ip_packet, s
     context->last_packet.assign(bytes, bytes + static_cast<std::ptrdiff_t>(ip_packet_size));
 }
 
-void on_tcp_handshake_completed(void* user_data, const mirage_tcp::FiveTuple&) {
+void on_tcp_handshake_completed(void* user_data, const mirage_tcp::ConnectionInfo&) {
     DemoContext* context = static_cast<DemoContext*>(user_data);
     context->handshake_completed = true;
 }
 
-void on_tcp_connection_reset(void*, const mirage_tcp::FiveTuple&) {
+void on_tcp_connection_reset(void*, const mirage_tcp::ConnectionInfo&) {
     std::cout << "flow reset by MirageTcp" << std::endl;
 }
 

@@ -1,5 +1,6 @@
 #include "mirage_tcp/mirage_tcp.h"
 
+#include <cstring>
 #include <vector>
 
 #include "mirage_tcp/ipv4_packet.h"
@@ -37,7 +38,7 @@ uint16_t internet_checksum(const uint8_t* data, size_t size) {
 }
 
 std::vector<uint8_t> serialize_tcp_segment_with_checksum(
-    const FiveTuple& five_tuple,
+    const ConnectionInfo& connection_info,
     uint32_t sequence_number,
     uint32_t acknowledgment_number,
     bool syn_flag,
@@ -47,8 +48,8 @@ std::vector<uint8_t> serialize_tcp_segment_with_checksum(
     const void* payload,
     size_t payload_size) {
     TcpSegment segment;
-    segment.source_port = five_tuple.server_port;
-    segment.destination_port = five_tuple.client_port;
+    segment.source_port = connection_info.server_port;
+    segment.destination_port = connection_info.client_port;
     segment.sequence_number = sequence_number;
     segment.acknowledgment_number = acknowledgment_number;
     segment.window_size = 65535;
@@ -63,15 +64,9 @@ std::vector<uint8_t> serialize_tcp_segment_with_checksum(
 
     std::vector<uint8_t> bytes = serialize_tcp_segment(segment);
     std::vector<uint8_t> pseudo_header(12 + bytes.size() + (bytes.size() % 2U), 0);
-    pseudo_header[0] = static_cast<uint8_t>((five_tuple.server_ip >> 24) & 0xff);
-    pseudo_header[1] = static_cast<uint8_t>((five_tuple.server_ip >> 16) & 0xff);
-    pseudo_header[2] = static_cast<uint8_t>((five_tuple.server_ip >> 8) & 0xff);
-    pseudo_header[3] = static_cast<uint8_t>(five_tuple.server_ip & 0xff);
-    pseudo_header[4] = static_cast<uint8_t>((five_tuple.client_ip >> 24) & 0xff);
-    pseudo_header[5] = static_cast<uint8_t>((five_tuple.client_ip >> 16) & 0xff);
-    pseudo_header[6] = static_cast<uint8_t>((five_tuple.client_ip >> 8) & 0xff);
-    pseudo_header[7] = static_cast<uint8_t>(five_tuple.client_ip & 0xff);
-    pseudo_header[9] = five_tuple.protocol;
+    std::memcpy(&pseudo_header[0], &connection_info.server_ip.ipv4, 4);
+    std::memcpy(&pseudo_header[4], &connection_info.client_ip.ipv4, 4);
+    pseudo_header[9] = 6;
     write_u16_be(static_cast<uint16_t>(bytes.size()), &pseudo_header[10]);
     for (size_t i = 0; i < bytes.size(); ++i) {
         pseudo_header[12 + i] = bytes[i];
@@ -85,27 +80,32 @@ std::vector<uint8_t> serialize_tcp_segment_with_checksum(
 
 }  // namespace
 
-FiveTuple::FiveTuple()
-    : client_ip(0),
-      server_ip(0),
-      client_port(0),
+ConnectionInfo::ConnectionInfo()
+    : client_port(0),
       server_port(0),
-      protocol(6) {}
+      ip_ver(0) {
+    std::memset(&client_ip, 0, sizeof(client_ip));
+    std::memset(&server_ip, 0, sizeof(server_ip));
+}
 
-bool operator<(const FiveTuple& left, const FiveTuple& right) {
-    if (left.client_ip != right.client_ip) {
-        return left.client_ip < right.client_ip;
+bool operator<(const ConnectionInfo& left, const ConnectionInfo& right) {
+    if (left.ip_ver != right.ip_ver) {
+        return left.ip_ver < right.ip_ver;
     }
-    if (left.server_ip != right.server_ip) {
-        return left.server_ip < right.server_ip;
+
+    const size_t address_size = left.ip_ver == 6 ? sizeof(left.client_ip.ipv6) : sizeof(left.client_ip.ipv4);
+    const int client_compare = std::memcmp(&left.client_ip, &right.client_ip, address_size);
+    if (client_compare != 0) {
+        return client_compare < 0;
+    }
+    const int server_compare = std::memcmp(&left.server_ip, &right.server_ip, address_size);
+    if (server_compare != 0) {
+        return server_compare < 0;
     }
     if (left.client_port != right.client_port) {
         return left.client_port < right.client_port;
     }
-    if (left.server_port != right.server_port) {
-        return left.server_port < right.server_port;
-    }
-    return left.protocol < right.protocol;
+    return left.server_port < right.server_port;
 }
 
 MirageTcpCallbacks::MirageTcpCallbacks()
@@ -138,18 +138,18 @@ bool MirageTcp::handle_incoming_ip_packet(const void* ip_packet, size_t ip_packe
         return false;
     }
 
-    FiveTuple key;
-    key.client_ip = ipv4_packet.source_address;
-    key.server_ip = ipv4_packet.destination_address;
+    ConnectionInfo key;
+    std::memcpy(&key.client_ip.ipv4, &ipv4_packet.source_address, sizeof(ipv4_packet.source_address));
+    std::memcpy(&key.server_ip.ipv4, &ipv4_packet.destination_address, sizeof(ipv4_packet.destination_address));
     key.client_port = tcp_segment.source_port;
     key.server_port = tcp_segment.destination_port;
-    key.protocol = ipv4_packet.protocol;
+    key.ip_ver = 4;
 
-    std::map<FiveTuple, Flow>::iterator it = flows_.find(key);
+    std::map<ConnectionInfo, Flow>::iterator it = ipv4_flows_.find(key);
     if (tcp_segment.syn && !tcp_segment.ack) {
         return handle_syn(key, tcp_segment.sequence_number);
     }
-    if (it == flows_.end()) {
+    if (it == ipv4_flows_.end()) {
         if (tcp_segment.rst) {
             return true;
         }
@@ -166,15 +166,15 @@ bool MirageTcp::handle_incoming_ip_packet(const void* ip_packet, size_t ip_packe
 
     Flow* flow = &it->second;
     if (tcp_segment.rst) {
-        const FiveTuple reset_flow = flow->five_tuple;
-        flows_.erase(reset_flow);
+        const ConnectionInfo reset_flow = flow->connection_info;
+        ipv4_flows_.erase(reset_flow);
         emit_reset(reset_flow);
         return true;
     }
     if (flow->state == FlowState::kSynReceived) {
         if (!tcp_segment.ack || tcp_segment.acknowledgment_number != flow->server_next_sequence) {
             return fail_flow(
-                flow->five_tuple,
+                flow->connection_info,
                 "expected final ACK of three-way handshake",
                 tcp_segment.sequence_number,
                 tcp_segment.acknowledgment_number,
@@ -185,7 +185,7 @@ bool MirageTcp::handle_incoming_ip_packet(const void* ip_packet, size_t ip_packe
         }
         if (tcp_segment.sequence_number != flow->client_next_sequence) {
             return fail_flow(
-                flow->five_tuple,
+                flow->connection_info,
                 "unexpected client sequence number during handshake completion",
                 tcp_segment.sequence_number,
                 tcp_segment.acknowledgment_number,
@@ -197,7 +197,7 @@ bool MirageTcp::handle_incoming_ip_packet(const void* ip_packet, size_t ip_packe
 
         flow->state = FlowState::kEstablished;
         if (callbacks_.on_tcp_handshake_completed != NULL) {
-            callbacks_.on_tcp_handshake_completed(callbacks_.user_data, flow->five_tuple);
+            callbacks_.on_tcp_handshake_completed(callbacks_.user_data, flow->connection_info);
         }
         return true;
     }
@@ -215,14 +215,22 @@ bool MirageTcp::handle_incoming_ip_packet(const void* ip_packet, size_t ip_packe
     return handle_last_ack_packet(flow, tcp_segment.acknowledgment_number, tcp_segment.ack);
 }
 
-bool MirageTcp::send_downstream_tcp_payload(const FiveTuple& five_tuple, const void* payload, size_t payload_size) {
+bool MirageTcp::send_downstream_tcp_payload(
+    const ConnectionInfo& connection_info,
+    const void* payload,
+    size_t payload_size) {
     if (payload == NULL || payload_size == 0) {
         emit_error("send_downstream_tcp_payload requires a non-empty payload");
         return false;
     }
 
-    std::map<FiveTuple, Flow>::iterator it = flows_.find(five_tuple);
-    if (it == flows_.end()) {
+    if (connection_info.ip_ver != 4) {
+        emit_error("send_downstream_tcp_payload currently only supports IPv4 flows");
+        return false;
+    }
+
+    std::map<ConnectionInfo, Flow>::iterator it = ipv4_flows_.find(connection_info);
+    if (it == ipv4_flows_.end()) {
         emit_error("cannot send downstream payload for unknown flow");
         return false;
     }
@@ -233,7 +241,7 @@ bool MirageTcp::send_downstream_tcp_payload(const FiveTuple& five_tuple, const v
 
     Flow* flow = &it->second;
     if (!emit_tcp_response(
-            flow->five_tuple,
+            flow->connection_info,
             flow->server_next_sequence,
             flow->client_next_sequence,
             false,
@@ -248,9 +256,14 @@ bool MirageTcp::send_downstream_tcp_payload(const FiveTuple& five_tuple, const v
     return true;
 }
 
-bool MirageTcp::close_flow(const FiveTuple& five_tuple) {
-    std::map<FiveTuple, Flow>::iterator it = flows_.find(five_tuple);
-    if (it == flows_.end()) {
+bool MirageTcp::close_flow(const ConnectionInfo& connection_info) {
+    if (connection_info.ip_ver != 4) {
+        emit_error("close_flow currently only supports IPv4 flows");
+        return false;
+    }
+
+    std::map<ConnectionInfo, Flow>::iterator it = ipv4_flows_.find(connection_info);
+    if (it == ipv4_flows_.end()) {
         emit_error("cannot close unknown flow");
         return false;
     }
@@ -261,7 +274,7 @@ bool MirageTcp::close_flow(const FiveTuple& five_tuple) {
 
     Flow* flow = &it->second;
     if (!emit_tcp_response(
-            flow->five_tuple,
+            flow->connection_info,
             flow->server_next_sequence,
             flow->client_next_sequence,
             false,
@@ -289,29 +302,29 @@ void MirageTcp::emit_downstream_ip_packet(const void* ip_packet, size_t ip_packe
     }
 }
 
-void MirageTcp::emit_reset(const FiveTuple& five_tuple) const {
+void MirageTcp::emit_reset(const ConnectionInfo& connection_info) const {
     if (callbacks_.on_tcp_connection_reset != NULL) {
-        callbacks_.on_tcp_connection_reset(callbacks_.user_data, five_tuple);
+        callbacks_.on_tcp_connection_reset(callbacks_.user_data, connection_info);
     }
 }
 
-bool MirageTcp::handle_syn(const FiveTuple& five_tuple, uint32_t client_sequence) {
+bool MirageTcp::handle_syn(const ConnectionInfo& connection_info, uint32_t client_sequence) {
     Flow flow;
-    flow.five_tuple = five_tuple;
+    flow.connection_info = connection_info;
     flow.state = FlowState::kSynReceived;
     flow.client_next_sequence = client_sequence + 1;
-    flow.server_initial_sequence = 7000 + static_cast<uint32_t>(flows_.size()) * 1024U;
+    flow.server_initial_sequence = 7000 + static_cast<uint32_t>(ipv4_flows_.size()) * 1024U;
     flow.server_next_sequence = flow.server_initial_sequence + 1;
 
-    std::pair<std::map<FiveTuple, Flow>::iterator, bool> inserted =
-        flows_.insert(std::make_pair(five_tuple, flow));
+    std::pair<std::map<ConnectionInfo, Flow>::iterator, bool> inserted =
+        ipv4_flows_.insert(std::make_pair(connection_info, flow));
     if (!inserted.second) {
         emit_error("tcp flow already exists");
         return false;
     }
 
     if (!emit_tcp_response(
-            five_tuple,
+            connection_info,
             flow.server_initial_sequence,
             flow.client_next_sequence,
             true,
@@ -320,7 +333,7 @@ bool MirageTcp::handle_syn(const FiveTuple& five_tuple, uint32_t client_sequence
             false,
             NULL,
             0)) {
-        flows_.erase(five_tuple);
+        ipv4_flows_.erase(connection_info);
         return false;
     }
     return true;
@@ -336,14 +349,14 @@ bool MirageTcp::handle_established_packet(
     const void* payload,
     size_t payload_size) {
     if (rst_flag) {
-        const FiveTuple reset_flow = flow->five_tuple;
-        flows_.erase(reset_flow);
+        const ConnectionInfo reset_flow = flow->connection_info;
+        ipv4_flows_.erase(reset_flow);
         emit_reset(reset_flow);
         return true;
     }
     if (!ack_flag) {
         return fail_flow(
-            flow->five_tuple,
+            flow->connection_info,
             "client packet in ESTABLISHED must carry ACK",
             sequence_number,
             acknowledgment_number,
@@ -354,7 +367,7 @@ bool MirageTcp::handle_established_packet(
     }
     if (acknowledgment_number != flow->server_next_sequence) {
         return fail_flow(
-            flow->five_tuple,
+            flow->connection_info,
             "client acknowledgment number does not match current server sequence",
             sequence_number,
             acknowledgment_number,
@@ -365,7 +378,7 @@ bool MirageTcp::handle_established_packet(
     }
     if (sequence_number != flow->client_next_sequence) {
         return fail_flow(
-            flow->five_tuple,
+            flow->connection_info,
             "unexpected client sequence number",
             sequence_number,
             acknowledgment_number,
@@ -380,12 +393,12 @@ bool MirageTcp::handle_established_packet(
         if (callbacks_.on_tcp_payload_received != NULL) {
             callbacks_.on_tcp_payload_received(
                 callbacks_.user_data,
-                flow->five_tuple,
+                flow->connection_info,
                 payload,
                 payload_size);
         }
         return emit_tcp_response(
-            flow->five_tuple,
+            flow->connection_info,
             flow->server_next_sequence,
             flow->client_next_sequence,
             false,
@@ -400,7 +413,7 @@ bool MirageTcp::handle_established_packet(
         flow->client_next_sequence += 1;
         flow->state = FlowState::kLastAck;
         if (!emit_tcp_response(
-                flow->five_tuple,
+                flow->connection_info,
                 flow->server_next_sequence,
                 flow->client_next_sequence,
                 false,
@@ -424,7 +437,7 @@ bool MirageTcp::handle_last_ack_packet(
     bool ack_flag) {
     if (!ack_flag) {
         return fail_flow(
-            flow->five_tuple,
+            flow->connection_info,
             "expected final ACK for locally terminated close",
             0,
             acknowledgment_number,
@@ -435,7 +448,7 @@ bool MirageTcp::handle_last_ack_packet(
     }
     if (acknowledgment_number != flow->server_next_sequence) {
         return fail_flow(
-            flow->five_tuple,
+            flow->connection_info,
             "unexpected acknowledgment for local FIN",
             0,
             acknowledgment_number,
@@ -445,8 +458,8 @@ bool MirageTcp::handle_last_ack_packet(
             0);
     }
 
-    const FiveTuple completed_flow = flow->five_tuple;
-    flows_.erase(completed_flow);
+    const ConnectionInfo completed_flow = flow->connection_info;
+    ipv4_flows_.erase(completed_flow);
     if (callbacks_.on_tcp_connection_closed != NULL) {
         callbacks_.on_tcp_connection_closed(callbacks_.user_data, completed_flow);
     }
@@ -454,7 +467,7 @@ bool MirageTcp::handle_last_ack_packet(
 }
 
 bool MirageTcp::emit_reset_for_unhandled_packet(
-    const FiveTuple& five_tuple,
+    const ConnectionInfo& connection_info,
     uint32_t sequence_number,
     uint32_t acknowledgment_number,
     bool ack_flag,
@@ -463,7 +476,7 @@ bool MirageTcp::emit_reset_for_unhandled_packet(
     size_t payload_size) {
     if (ack_flag) {
         return emit_tcp_response(
-            five_tuple,
+            connection_info,
             acknowledgment_number,
             0,
             false,
@@ -482,7 +495,7 @@ bool MirageTcp::emit_reset_for_unhandled_packet(
         ++ack_number;
     }
     return emit_tcp_response(
-        five_tuple,
+        connection_info,
         0,
         ack_number,
         false,
@@ -494,7 +507,7 @@ bool MirageTcp::emit_reset_for_unhandled_packet(
 }
 
 bool MirageTcp::fail_flow(
-    const FiveTuple& five_tuple,
+    const ConnectionInfo& connection_info,
     const std::string& message,
     uint32_t sequence_number,
     uint32_t acknowledgment_number,
@@ -503,21 +516,21 @@ bool MirageTcp::fail_flow(
     bool fin_flag,
     size_t payload_size) {
     emit_error(message);
-    flows_.erase(five_tuple);
+    ipv4_flows_.erase(connection_info);
     emit_reset_for_unhandled_packet(
-        five_tuple,
+        connection_info,
         sequence_number,
         acknowledgment_number,
         ack_flag,
         syn_flag,
         fin_flag,
         payload_size);
-    emit_reset(five_tuple);
+    emit_reset(connection_info);
     return false;
 }
 
 bool MirageTcp::emit_tcp_response(
-    const FiveTuple& five_tuple,
+    const ConnectionInfo& connection_info,
     uint32_t sequence_number,
     uint32_t acknowledgment_number,
     bool syn_flag,
@@ -527,12 +540,12 @@ bool MirageTcp::emit_tcp_response(
     const void* payload,
     size_t payload_size) {
     Ipv4Packet packet;
-    packet.source_address = five_tuple.server_ip;
-    packet.destination_address = five_tuple.client_ip;
-    packet.protocol = five_tuple.protocol;
+    std::memcpy(&packet.source_address, &connection_info.server_ip.ipv4, sizeof(packet.source_address));
+    std::memcpy(&packet.destination_address, &connection_info.client_ip.ipv4, sizeof(packet.destination_address));
+    packet.protocol = 6;
     packet.ttl = 64;
     packet.payload = serialize_tcp_segment_with_checksum(
-        five_tuple,
+        connection_info,
         sequence_number,
         acknowledgment_number,
         syn_flag,

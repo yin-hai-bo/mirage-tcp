@@ -1,4 +1,5 @@
 #include <cstddef>
+#include <cstring>
 #include <cstdint>
 #include <functional>
 #include <iostream>
@@ -19,10 +20,10 @@ struct TestCase {
 
 struct CallbackContext {
     std::vector<std::vector<std::uint8_t> > downstream_packets;
-    std::vector<mirage_tcp::FiveTuple> handshakes;
+    std::vector<mirage_tcp::ConnectionInfo> handshakes;
     std::vector<std::vector<std::uint8_t> > payloads;
-    std::vector<mirage_tcp::FiveTuple> closed_flows;
-    std::vector<mirage_tcp::FiveTuple> reset_flows;
+    std::vector<mirage_tcp::ConnectionInfo> closed_flows;
+    std::vector<mirage_tcp::ConnectionInfo> reset_flows;
     std::vector<std::string> errors;
 };
 
@@ -39,14 +40,25 @@ void on_downstream_ip_packet_generated(void* user_data, const void* ip_packet, s
         std::vector<std::uint8_t>(bytes, bytes + static_cast<std::ptrdiff_t>(ip_packet_size)));
 }
 
-void on_tcp_handshake_completed(void* user_data, const mirage_tcp::FiveTuple& five_tuple) {
+mirage_tcp::in_addr make_ipv4_address(std::uint8_t a, std::uint8_t b, std::uint8_t c, std::uint8_t d) {
+    mirage_tcp::in_addr address;
+    const std::uint8_t bytes[4] = {a, b, c, d};
+    std::memcpy(&address, bytes, sizeof(address));
+    return address;
+}
+
+bool same_ipv4_address(const mirage_tcp::in_addr& left, const mirage_tcp::in_addr& right) {
+    return std::memcmp(&left, &right, sizeof(left)) == 0;
+}
+
+void on_tcp_handshake_completed(void* user_data, const mirage_tcp::ConnectionInfo& connection_info) {
     CallbackContext* context = static_cast<CallbackContext*>(user_data);
-    context->handshakes.push_back(five_tuple);
+    context->handshakes.push_back(connection_info);
 }
 
 void on_tcp_payload_received(
     void* user_data,
-    const mirage_tcp::FiveTuple&,
+    const mirage_tcp::ConnectionInfo&,
     const void* payload,
     std::size_t payload_size) {
     CallbackContext* context = static_cast<CallbackContext*>(user_data);
@@ -55,14 +67,14 @@ void on_tcp_payload_received(
         std::vector<std::uint8_t>(bytes, bytes + static_cast<std::ptrdiff_t>(payload_size)));
 }
 
-void on_tcp_connection_closed(void* user_data, const mirage_tcp::FiveTuple& five_tuple) {
+void on_tcp_connection_closed(void* user_data, const mirage_tcp::ConnectionInfo& connection_info) {
     CallbackContext* context = static_cast<CallbackContext*>(user_data);
-    context->closed_flows.push_back(five_tuple);
+    context->closed_flows.push_back(connection_info);
 }
 
-void on_tcp_connection_reset(void* user_data, const mirage_tcp::FiveTuple& five_tuple) {
+void on_tcp_connection_reset(void* user_data, const mirage_tcp::ConnectionInfo& connection_info) {
     CallbackContext* context = static_cast<CallbackContext*>(user_data);
-    context->reset_flows.push_back(five_tuple);
+    context->reset_flows.push_back(connection_info);
 }
 
 void on_error(void* user_data, const char* message) {
@@ -82,18 +94,18 @@ mirage_tcp::MirageTcp make_mirage_tcp(CallbackContext* context) {
     return mirage_tcp::MirageTcp(callbacks);
 }
 
-mirage_tcp::FiveTuple make_flow() {
-    mirage_tcp::FiveTuple flow;
-    flow.client_ip = 0x0a000001U;
-    flow.server_ip = 0x5db8d822U;
+mirage_tcp::ConnectionInfo make_flow() {
+    mirage_tcp::ConnectionInfo flow;
+    flow.client_ip.ipv4 = make_ipv4_address(10, 0, 0, 1);
+    flow.server_ip.ipv4 = make_ipv4_address(93, 184, 216, 34);
     flow.client_port = 49152;
     flow.server_port = 443;
-    flow.protocol = 6;
+    flow.ip_ver = 4;
     return flow;
 }
 
 std::vector<std::uint8_t> build_client_packet(
-    const mirage_tcp::FiveTuple& flow,
+    const mirage_tcp::ConnectionInfo& flow,
     std::uint32_t sequence_number,
     std::uint32_t acknowledgment_number,
     bool syn,
@@ -113,8 +125,8 @@ std::vector<std::uint8_t> build_client_packet(
     segment.payload = payload;
 
     mirage_tcp::Ipv4Packet packet;
-    packet.source_address = flow.client_ip;
-    packet.destination_address = flow.server_ip;
+    std::memcpy(&packet.source_address, &flow.client_ip.ipv4, sizeof(packet.source_address));
+    std::memcpy(&packet.destination_address, &flow.server_ip.ipv4, sizeof(packet.destination_address));
     packet.protocol = 6;
     packet.ttl = 64;
     packet.payload = mirage_tcp::serialize_tcp_segment(segment);
@@ -138,8 +150,10 @@ mirage_tcp::TcpSegment parse_tcp_from_ip(const std::vector<std::uint8_t>& packet
 
 void test_ipv4_roundtrip() {
     mirage_tcp::Ipv4Packet packet;
-    packet.source_address = 0x0a000001U;
-    packet.destination_address = 0x0a000002U;
+    const mirage_tcp::in_addr source_address = make_ipv4_address(10, 0, 0, 1);
+    const mirage_tcp::in_addr destination_address = make_ipv4_address(10, 0, 0, 2);
+    std::memcpy(&packet.source_address, &source_address, sizeof(packet.source_address));
+    std::memcpy(&packet.destination_address, &destination_address, sizeof(packet.destination_address));
     packet.protocol = 6;
     packet.ttl = 42;
     packet.payload.assign(5, 0x11);
@@ -150,8 +164,10 @@ void test_ipv4_roundtrip() {
 
     mirage_tcp::Ipv4Packet parsed;
     require(mirage_tcp::parse_ipv4_packet(&bytes[0], bytes.size(), &parsed, &error_message), error_message);
-    require(parsed.source_address == packet.source_address, "ipv4 source mismatch");
-    require(parsed.destination_address == packet.destination_address, "ipv4 destination mismatch");
+    require(std::memcmp(&parsed.source_address, &packet.source_address, sizeof(packet.source_address)) == 0, "ipv4 source mismatch");
+    require(
+        std::memcmp(&parsed.destination_address, &packet.destination_address, sizeof(packet.destination_address)) == 0,
+        "ipv4 destination mismatch");
     require(parsed.protocol == packet.protocol, "ipv4 protocol mismatch");
     require(parsed.payload == packet.payload, "ipv4 payload mismatch");
 }
@@ -159,7 +175,7 @@ void test_ipv4_roundtrip() {
 void test_syn_generates_downstream_syn_ack() {
     CallbackContext context;
     mirage_tcp::MirageTcp mirage_tcp = make_mirage_tcp(&context);
-    mirage_tcp::FiveTuple flow = make_flow();
+    mirage_tcp::ConnectionInfo flow = make_flow();
 
     std::vector<std::uint8_t> syn_packet = build_client_packet(flow, 1000, 0, true, false, false, std::vector<std::uint8_t>());
     require(mirage_tcp.handle_incoming_ip_packet(&syn_packet[0], syn_packet.size()), "SYN should be accepted");
@@ -176,7 +192,7 @@ void test_syn_generates_downstream_syn_ack() {
 void test_final_ack_completes_handshake() {
     CallbackContext context;
     mirage_tcp::MirageTcp mirage_tcp = make_mirage_tcp(&context);
-    mirage_tcp::FiveTuple flow = make_flow();
+    mirage_tcp::ConnectionInfo flow = make_flow();
 
     std::vector<std::uint8_t> syn_packet = build_client_packet(flow, 1000, 0, true, false, false, std::vector<std::uint8_t>());
     require(mirage_tcp.handle_incoming_ip_packet(&syn_packet[0], syn_packet.size()), "SYN should be accepted");
@@ -193,12 +209,14 @@ void test_final_ack_completes_handshake() {
     require(mirage_tcp.handle_incoming_ip_packet(&final_ack[0], final_ack.size()), "final ACK should be accepted");
     require(context.handshakes.size() == 1, "handshake callback should fire once");
     require(context.handshakes[0].client_port == flow.client_port, "handshake flow client port mismatch");
+    require(context.handshakes[0].ip_ver == 4, "handshake flow ip version mismatch");
+    require(same_ipv4_address(context.handshakes[0].client_ip.ipv4, flow.client_ip.ipv4), "handshake flow client ip mismatch");
 }
 
 void test_payload_is_reported_and_acked() {
     CallbackContext context;
     mirage_tcp::MirageTcp mirage_tcp = make_mirage_tcp(&context);
-    mirage_tcp::FiveTuple flow = make_flow();
+    mirage_tcp::ConnectionInfo flow = make_flow();
 
     std::vector<std::uint8_t> syn_packet = build_client_packet(flow, 1000, 0, true, false, false, std::vector<std::uint8_t>());
     require(mirage_tcp.handle_incoming_ip_packet(&syn_packet[0], syn_packet.size()), "SYN should be accepted");
@@ -238,7 +256,7 @@ void test_payload_is_reported_and_acked() {
 void test_fin_generates_fin_ack_and_close_event() {
     CallbackContext context;
     mirage_tcp::MirageTcp mirage_tcp = make_mirage_tcp(&context);
-    mirage_tcp::FiveTuple flow = make_flow();
+    mirage_tcp::ConnectionInfo flow = make_flow();
 
     std::vector<std::uint8_t> syn_packet = build_client_packet(flow, 1000, 0, true, false, false, std::vector<std::uint8_t>());
     require(mirage_tcp.handle_incoming_ip_packet(&syn_packet[0], syn_packet.size()), "SYN should be accepted");
@@ -285,7 +303,7 @@ void test_fin_generates_fin_ack_and_close_event() {
 void test_invalid_flow_reports_error() {
     CallbackContext context;
     mirage_tcp::MirageTcp mirage_tcp = make_mirage_tcp(&context);
-    mirage_tcp::FiveTuple flow = make_flow();
+    mirage_tcp::ConnectionInfo flow = make_flow();
 
     std::vector<std::uint8_t> ack_packet = build_client_packet(
         flow,
@@ -305,7 +323,7 @@ void test_invalid_flow_reports_error() {
 void test_send_downstream_payload_generates_data_segment() {
     CallbackContext context;
     mirage_tcp::MirageTcp mirage_tcp = make_mirage_tcp(&context);
-    mirage_tcp::FiveTuple flow = make_flow();
+    mirage_tcp::ConnectionInfo flow = make_flow();
 
     std::vector<std::uint8_t> syn_packet = build_client_packet(flow, 1000, 0, true, false, false, std::vector<std::uint8_t>());
     require(mirage_tcp.handle_incoming_ip_packet(&syn_packet[0], syn_packet.size()), "SYN should be accepted");
@@ -350,7 +368,7 @@ void test_send_downstream_payload_generates_data_segment() {
 void test_close_flow_generates_fin_ack_and_close_event() {
     CallbackContext context;
     mirage_tcp::MirageTcp mirage_tcp = make_mirage_tcp(&context);
-    mirage_tcp::FiveTuple flow = make_flow();
+    mirage_tcp::ConnectionInfo flow = make_flow();
 
     std::vector<std::uint8_t> syn_packet = build_client_packet(flow, 1000, 0, true, false, false, std::vector<std::uint8_t>());
     require(mirage_tcp.handle_incoming_ip_packet(&syn_packet[0], syn_packet.size()), "SYN should be accepted");
@@ -387,7 +405,7 @@ void test_close_flow_generates_fin_ack_and_close_event() {
 void test_incoming_rst_clears_flow() {
     CallbackContext context;
     mirage_tcp::MirageTcp mirage_tcp = make_mirage_tcp(&context);
-    mirage_tcp::FiveTuple flow = make_flow();
+    mirage_tcp::ConnectionInfo flow = make_flow();
 
     std::vector<std::uint8_t> syn_packet = build_client_packet(flow, 1000, 0, true, false, false, std::vector<std::uint8_t>());
     require(mirage_tcp.handle_incoming_ip_packet(&syn_packet[0], syn_packet.size()), "SYN should be accepted");
@@ -428,7 +446,7 @@ void test_incoming_rst_clears_flow() {
 void test_invalid_ack_resets_existing_flow() {
     CallbackContext context;
     mirage_tcp::MirageTcp mirage_tcp = make_mirage_tcp(&context);
-    mirage_tcp::FiveTuple flow = make_flow();
+    mirage_tcp::ConnectionInfo flow = make_flow();
 
     std::vector<std::uint8_t> syn_packet = build_client_packet(flow, 1000, 0, true, false, false, std::vector<std::uint8_t>());
     require(mirage_tcp.handle_incoming_ip_packet(&syn_packet[0], syn_packet.size()), "SYN should be accepted");

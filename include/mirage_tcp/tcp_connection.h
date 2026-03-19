@@ -80,6 +80,7 @@ public:
      * @return true if the connect attempt is started; otherwise false.
      */
     bool connect(uint16_t remote_port);
+
     /**
      * @brief Queues payload for transmission on an established connection.
      *
@@ -87,12 +88,14 @@ public:
      * @return true if the payload is accepted; otherwise false.
      */
     bool write(const std::vector<uint8_t>& data);
+
     /**
      * @brief Starts a local close when allowed by the current state.
      *
      * @return true if close processing is started; otherwise false.
      */
     bool close();
+
     /**
      * @brief Pushes one parsed inbound TCP segment into the state machine.
      *
@@ -100,6 +103,7 @@ public:
      * @return true if the segment is accepted; otherwise false.
      */
     bool push_incoming_segment(const TcpSegment& segment);
+
     /**
      * @brief Parses and pushes one inbound TCP segment.
      *
@@ -108,6 +112,7 @@ public:
      * @return true if the bytes are accepted; otherwise false.
      */
     bool push_incoming_bytes(const std::vector<uint8_t>& bytes, std::string* error_message);
+
     /**
      * @brief Advances timer-driven state such as TIME-WAIT expiration.
      *
@@ -121,6 +126,7 @@ public:
      * @return Outbound segments queued since the last drain.
      */
     std::vector<OutgoingSegment> drain_outgoing();
+
     /**
      * @brief Returns and clears queued connection events.
      *
@@ -130,10 +136,13 @@ public:
 
     /** @brief Returns the current TCP state. */
     TcpState state() const;
+
     /** @brief Returns the configured local TCP port. */
     uint16_t local_port() const;
+
     /** @brief Returns the configured remote TCP port. */
     uint16_t remote_port() const;
+
     /** @brief Returns whether a remote TCP port has been configured. */
     bool has_remote_port() const;
 
@@ -145,21 +154,37 @@ private:
     };
 
     void set_state(TcpState new_state);
+
     void emit_error(const std::string& message);
+
     void emit_closed(const std::string& message);
+
     void queue_segment(const TcpSegment& segment);
+
     void queue_control_segment(bool syn, bool ack, bool fin, bool rst);
+
     void queue_ack();
+
     void queue_payload_segment(const std::vector<uint8_t>& data);
+
     void handle_ack(uint32_t acknowledgment_number);
+
     void maybe_send_queued_fin();
+
     bool matches_peer(const TcpSegment& segment) const;
+
     bool handle_reset();
+
     bool handle_syn_sent(const TcpSegment& segment);
+
     bool handle_established(const TcpSegment& segment);
+
     bool handle_fin_wait_1(const TcpSegment& segment);
+
     bool handle_fin_wait_2(const TcpSegment& segment);
+
     bool handle_closing(const TcpSegment& segment);
+
     void enter_time_wait();
 
     uint16_t local_port_;

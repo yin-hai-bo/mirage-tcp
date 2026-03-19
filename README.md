@@ -7,7 +7,7 @@
 - 不负责拦截 `IP packet`；抓包、注包由外部库负责，例如 `WinTun`。
 - 处理完整 `IPv4/TCP packet`，输入接口使用 `const void* + size_t`。
 - 通过回调把 `MirageTCP` 伪造出的下行 `IPv4 packet` 通知给调用方。
-- 基于五元组维护多个被接管的 `TCP flow`。
+- 基于 `ConnectionInfo` 维护多个被接管的 `TCP flow`。
 
 ## v1 已支持
 
@@ -33,7 +33,7 @@
 - `IPv4 fragment`
 - `TCP option`
 
-当前实现面向“本地截获并本地终结”的最小场景，重点是握手接管与五元组事件，不是完整协议栈。
+当前实现面向“本地截获并本地终结”的最小场景，重点是握手接管与连接事件，不是完整协议栈。
 
 ## 构建
 
@@ -55,8 +55,9 @@ callbacks.on_tcp_connection_reset = my_reset_callback;
 
 mirage_tcp::MirageTcp mirage_tcp(callbacks);
 mirage_tcp.handle_incoming_ip_packet(ip_packet, ip_packet_size);
-mirage_tcp.send_downstream_tcp_payload(five_tuple, payload, payload_size);
-mirage_tcp.close_flow(five_tuple);
+mirage_tcp::ConnectionInfo connection_info;
+mirage_tcp.send_downstream_tcp_payload(connection_info, payload, payload_size);
+mirage_tcp.close_flow(connection_info);
 ```
 
 完整示例见 `examples/basic_client.cpp`。
