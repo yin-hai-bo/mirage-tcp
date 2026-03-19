@@ -1,0 +1,479 @@
+#include <cstddef>
+#include <cstdint>
+#include <functional>
+#include <iostream>
+#include <stdexcept>
+#include <string>
+#include <vector>
+
+#include "mirage_tcp/ipv4_packet.h"
+#include "mirage_tcp/mirage_tcp.h"
+#include "mirage_tcp/tcp_segment.h"
+
+namespace {
+
+struct TestCase {
+    const char* name;
+    std::function<void()> run;
+};
+
+struct CallbackContext {
+    std::vector<std::vector<std::uint8_t> > downstream_packets;
+    std::vector<mirage_tcp::FiveTuple> handshakes;
+    std::vector<std::vector<std::uint8_t> > payloads;
+    std::vector<mirage_tcp::FiveTuple> closed_flows;
+    std::vector<mirage_tcp::FiveTuple> reset_flows;
+    std::vector<std::string> errors;
+};
+
+void require(bool condition, const std::string& message) {
+    if (!condition) {
+        throw std::runtime_error(message);
+    }
+}
+
+void on_downstream_ip_packet_generated(void* user_data, const void* ip_packet, std::size_t ip_packet_size) {
+    CallbackContext* context = static_cast<CallbackContext*>(user_data);
+    const std::uint8_t* bytes = static_cast<const std::uint8_t*>(ip_packet);
+    context->downstream_packets.push_back(
+        std::vector<std::uint8_t>(bytes, bytes + static_cast<std::ptrdiff_t>(ip_packet_size)));
+}
+
+void on_tcp_handshake_completed(void* user_data, const mirage_tcp::FiveTuple& five_tuple) {
+    CallbackContext* context = static_cast<CallbackContext*>(user_data);
+    context->handshakes.push_back(five_tuple);
+}
+
+void on_tcp_payload_received(
+    void* user_data,
+    const mirage_tcp::FiveTuple&,
+    const void* payload,
+    std::size_t payload_size) {
+    CallbackContext* context = static_cast<CallbackContext*>(user_data);
+    const std::uint8_t* bytes = static_cast<const std::uint8_t*>(payload);
+    context->payloads.push_back(
+        std::vector<std::uint8_t>(bytes, bytes + static_cast<std::ptrdiff_t>(payload_size)));
+}
+
+void on_tcp_connection_closed(void* user_data, const mirage_tcp::FiveTuple& five_tuple) {
+    CallbackContext* context = static_cast<CallbackContext*>(user_data);
+    context->closed_flows.push_back(five_tuple);
+}
+
+void on_tcp_connection_reset(void* user_data, const mirage_tcp::FiveTuple& five_tuple) {
+    CallbackContext* context = static_cast<CallbackContext*>(user_data);
+    context->reset_flows.push_back(five_tuple);
+}
+
+void on_error(void* user_data, const char* message) {
+    CallbackContext* context = static_cast<CallbackContext*>(user_data);
+    context->errors.push_back(message == NULL ? "" : message);
+}
+
+mirage_tcp::MirageTcp make_mirage_tcp(CallbackContext* context) {
+    mirage_tcp::MirageTcpCallbacks callbacks;
+    callbacks.user_data = context;
+    callbacks.on_downstream_ip_packet_generated = on_downstream_ip_packet_generated;
+    callbacks.on_tcp_handshake_completed = on_tcp_handshake_completed;
+    callbacks.on_tcp_payload_received = on_tcp_payload_received;
+    callbacks.on_tcp_connection_closed = on_tcp_connection_closed;
+    callbacks.on_tcp_connection_reset = on_tcp_connection_reset;
+    callbacks.on_error = on_error;
+    return mirage_tcp::MirageTcp(callbacks);
+}
+
+mirage_tcp::FiveTuple make_flow() {
+    mirage_tcp::FiveTuple flow;
+    flow.client_ip = 0x0a000001U;
+    flow.server_ip = 0x5db8d822U;
+    flow.client_port = 49152;
+    flow.server_port = 443;
+    flow.protocol = 6;
+    return flow;
+}
+
+std::vector<std::uint8_t> build_client_packet(
+    const mirage_tcp::FiveTuple& flow,
+    std::uint32_t sequence_number,
+    std::uint32_t acknowledgment_number,
+    bool syn,
+    bool ack,
+    bool fin,
+    const std::vector<std::uint8_t>& payload) {
+    mirage_tcp::TcpSegment segment;
+    segment.source_port = flow.client_port;
+    segment.destination_port = flow.server_port;
+    segment.sequence_number = sequence_number;
+    segment.acknowledgment_number = acknowledgment_number;
+    segment.window_size = 65535;
+    segment.syn = syn;
+    segment.ack = ack;
+    segment.fin = fin;
+    segment.rst = false;
+    segment.payload = payload;
+
+    mirage_tcp::Ipv4Packet packet;
+    packet.source_address = flow.client_ip;
+    packet.destination_address = flow.server_ip;
+    packet.protocol = 6;
+    packet.ttl = 64;
+    packet.payload = mirage_tcp::serialize_tcp_segment(segment);
+    std::string error_message;
+    std::vector<std::uint8_t> bytes = mirage_tcp::serialize_ipv4_packet(packet, &error_message);
+    require(!bytes.empty(), "client packet serialization should succeed");
+    return bytes;
+}
+
+mirage_tcp::TcpSegment parse_tcp_from_ip(const std::vector<std::uint8_t>& packet_bytes) {
+    mirage_tcp::Ipv4Packet ip_packet;
+    std::string error_message;
+    require(
+        mirage_tcp::parse_ipv4_packet(&packet_bytes[0], packet_bytes.size(), &ip_packet, &error_message),
+        error_message);
+
+    mirage_tcp::TcpSegment segment;
+    require(mirage_tcp::parse_tcp_segment(ip_packet.payload, &segment, &error_message), error_message);
+    return segment;
+}
+
+void test_ipv4_roundtrip() {
+    mirage_tcp::Ipv4Packet packet;
+    packet.source_address = 0x0a000001U;
+    packet.destination_address = 0x0a000002U;
+    packet.protocol = 6;
+    packet.ttl = 42;
+    packet.payload.assign(5, 0x11);
+
+    std::string error_message;
+    std::vector<std::uint8_t> bytes = mirage_tcp::serialize_ipv4_packet(packet, &error_message);
+    require(!bytes.empty(), "ipv4 serialize should succeed");
+
+    mirage_tcp::Ipv4Packet parsed;
+    require(mirage_tcp::parse_ipv4_packet(&bytes[0], bytes.size(), &parsed, &error_message), error_message);
+    require(parsed.source_address == packet.source_address, "ipv4 source mismatch");
+    require(parsed.destination_address == packet.destination_address, "ipv4 destination mismatch");
+    require(parsed.protocol == packet.protocol, "ipv4 protocol mismatch");
+    require(parsed.payload == packet.payload, "ipv4 payload mismatch");
+}
+
+void test_syn_generates_downstream_syn_ack() {
+    CallbackContext context;
+    mirage_tcp::MirageTcp mirage_tcp = make_mirage_tcp(&context);
+    mirage_tcp::FiveTuple flow = make_flow();
+
+    std::vector<std::uint8_t> syn_packet = build_client_packet(flow, 1000, 0, true, false, false, std::vector<std::uint8_t>());
+    require(mirage_tcp.handle_incoming_ip_packet(&syn_packet[0], syn_packet.size()), "SYN should be accepted");
+    require(context.downstream_packets.size() == 1, "SYN should generate one downstream packet");
+    require(context.handshakes.empty(), "handshake should not complete after SYN only");
+
+    mirage_tcp::TcpSegment response = parse_tcp_from_ip(context.downstream_packets[0]);
+    require(response.syn, "response should contain SYN");
+    require(response.ack, "response should contain ACK");
+    require(!response.fin, "response should not contain FIN");
+    require(response.acknowledgment_number == 1001, "SYN+ACK must acknowledge client SYN");
+}
+
+void test_final_ack_completes_handshake() {
+    CallbackContext context;
+    mirage_tcp::MirageTcp mirage_tcp = make_mirage_tcp(&context);
+    mirage_tcp::FiveTuple flow = make_flow();
+
+    std::vector<std::uint8_t> syn_packet = build_client_packet(flow, 1000, 0, true, false, false, std::vector<std::uint8_t>());
+    require(mirage_tcp.handle_incoming_ip_packet(&syn_packet[0], syn_packet.size()), "SYN should be accepted");
+
+    mirage_tcp::TcpSegment syn_ack = parse_tcp_from_ip(context.downstream_packets[0]);
+    std::vector<std::uint8_t> final_ack = build_client_packet(
+        flow,
+        1001,
+        syn_ack.sequence_number + 1,
+        false,
+        true,
+        false,
+        std::vector<std::uint8_t>());
+    require(mirage_tcp.handle_incoming_ip_packet(&final_ack[0], final_ack.size()), "final ACK should be accepted");
+    require(context.handshakes.size() == 1, "handshake callback should fire once");
+    require(context.handshakes[0].client_port == flow.client_port, "handshake flow client port mismatch");
+}
+
+void test_payload_is_reported_and_acked() {
+    CallbackContext context;
+    mirage_tcp::MirageTcp mirage_tcp = make_mirage_tcp(&context);
+    mirage_tcp::FiveTuple flow = make_flow();
+
+    std::vector<std::uint8_t> syn_packet = build_client_packet(flow, 1000, 0, true, false, false, std::vector<std::uint8_t>());
+    require(mirage_tcp.handle_incoming_ip_packet(&syn_packet[0], syn_packet.size()), "SYN should be accepted");
+    mirage_tcp::TcpSegment syn_ack = parse_tcp_from_ip(context.downstream_packets[0]);
+
+    std::vector<std::uint8_t> final_ack = build_client_packet(
+        flow,
+        1001,
+        syn_ack.sequence_number + 1,
+        false,
+        true,
+        false,
+        std::vector<std::uint8_t>());
+    require(mirage_tcp.handle_incoming_ip_packet(&final_ack[0], final_ack.size()), "final ACK should be accepted");
+
+    std::vector<std::uint8_t> payload;
+    payload.push_back('o');
+    payload.push_back('k');
+    std::vector<std::uint8_t> payload_packet = build_client_packet(
+        flow,
+        1001,
+        syn_ack.sequence_number + 1,
+        false,
+        true,
+        false,
+        payload);
+    require(mirage_tcp.handle_incoming_ip_packet(&payload_packet[0], payload_packet.size()), "payload should be accepted");
+
+    require(context.payloads.size() == 1, "payload callback should fire once");
+    require(context.payloads[0] == payload, "payload callback content mismatch");
+    require(context.downstream_packets.size() == 2, "payload should generate one ACK packet");
+    mirage_tcp::TcpSegment ack_only = parse_tcp_from_ip(context.downstream_packets[1]);
+    require(ack_only.ack, "payload response should ACK");
+    require(ack_only.acknowledgment_number == 1003, "payload ACK number mismatch");
+}
+
+void test_fin_generates_fin_ack_and_close_event() {
+    CallbackContext context;
+    mirage_tcp::MirageTcp mirage_tcp = make_mirage_tcp(&context);
+    mirage_tcp::FiveTuple flow = make_flow();
+
+    std::vector<std::uint8_t> syn_packet = build_client_packet(flow, 1000, 0, true, false, false, std::vector<std::uint8_t>());
+    require(mirage_tcp.handle_incoming_ip_packet(&syn_packet[0], syn_packet.size()), "SYN should be accepted");
+    mirage_tcp::TcpSegment syn_ack = parse_tcp_from_ip(context.downstream_packets[0]);
+
+    std::vector<std::uint8_t> final_ack = build_client_packet(
+        flow,
+        1001,
+        syn_ack.sequence_number + 1,
+        false,
+        true,
+        false,
+        std::vector<std::uint8_t>());
+    require(mirage_tcp.handle_incoming_ip_packet(&final_ack[0], final_ack.size()), "final ACK should be accepted");
+
+    std::vector<std::uint8_t> fin_packet = build_client_packet(
+        flow,
+        1001,
+        syn_ack.sequence_number + 1,
+        false,
+        true,
+        true,
+        std::vector<std::uint8_t>());
+    require(mirage_tcp.handle_incoming_ip_packet(&fin_packet[0], fin_packet.size()), "FIN should be accepted");
+    require(context.downstream_packets.size() == 2, "FIN should generate one FIN+ACK");
+    mirage_tcp::TcpSegment fin_ack = parse_tcp_from_ip(context.downstream_packets[1]);
+    require(fin_ack.fin, "response to FIN should include FIN");
+    require(fin_ack.ack, "response to FIN should include ACK");
+
+    std::vector<std::uint8_t> final_close_ack = build_client_packet(
+        flow,
+        1002,
+        fin_ack.sequence_number + 1,
+        false,
+        true,
+        false,
+        std::vector<std::uint8_t>());
+    require(
+        mirage_tcp.handle_incoming_ip_packet(&final_close_ack[0], final_close_ack.size()),
+        "final close ACK should be accepted");
+    require(context.closed_flows.size() == 1, "close callback should fire once");
+}
+
+void test_invalid_flow_reports_error() {
+    CallbackContext context;
+    mirage_tcp::MirageTcp mirage_tcp = make_mirage_tcp(&context);
+    mirage_tcp::FiveTuple flow = make_flow();
+
+    std::vector<std::uint8_t> ack_packet = build_client_packet(
+        flow,
+        1001,
+        2000,
+        false,
+        true,
+        false,
+        std::vector<std::uint8_t>());
+    require(mirage_tcp.handle_incoming_ip_packet(&ack_packet[0], ack_packet.size()), "unknown flow should be handled with reset");
+    require(!context.errors.empty(), "unknown flow should emit error");
+    require(context.downstream_packets.size() == 1, "unknown flow should generate one reset packet");
+    mirage_tcp::TcpSegment reset = parse_tcp_from_ip(context.downstream_packets[0]);
+    require(reset.rst, "unknown flow response should be RST");
+}
+
+void test_send_downstream_payload_generates_data_segment() {
+    CallbackContext context;
+    mirage_tcp::MirageTcp mirage_tcp = make_mirage_tcp(&context);
+    mirage_tcp::FiveTuple flow = make_flow();
+
+    std::vector<std::uint8_t> syn_packet = build_client_packet(flow, 1000, 0, true, false, false, std::vector<std::uint8_t>());
+    require(mirage_tcp.handle_incoming_ip_packet(&syn_packet[0], syn_packet.size()), "SYN should be accepted");
+    mirage_tcp::TcpSegment syn_ack = parse_tcp_from_ip(context.downstream_packets[0]);
+
+    std::vector<std::uint8_t> final_ack = build_client_packet(
+        flow,
+        1001,
+        syn_ack.sequence_number + 1,
+        false,
+        true,
+        false,
+        std::vector<std::uint8_t>());
+    require(mirage_tcp.handle_incoming_ip_packet(&final_ack[0], final_ack.size()), "final ACK should be accepted");
+
+    std::vector<std::uint8_t> payload;
+    payload.push_back('p');
+    payload.push_back('o');
+    payload.push_back('n');
+    payload.push_back('g');
+    require(
+        mirage_tcp.send_downstream_tcp_payload(flow, &payload[0], payload.size()),
+        "send_downstream_tcp_payload should succeed");
+    require(context.downstream_packets.size() == 2, "downstream payload should generate one packet");
+    mirage_tcp::TcpSegment response = parse_tcp_from_ip(context.downstream_packets[1]);
+    require(response.ack, "downstream payload should carry ACK");
+    require(response.payload == payload, "downstream payload content mismatch");
+
+    std::vector<std::uint8_t> payload_ack = build_client_packet(
+        flow,
+        1001,
+        response.sequence_number + static_cast<std::uint32_t>(payload.size()),
+        false,
+        true,
+        false,
+        std::vector<std::uint8_t>());
+    require(
+        mirage_tcp.handle_incoming_ip_packet(&payload_ack[0], payload_ack.size()),
+        "client ACK for downstream payload should be accepted");
+}
+
+void test_close_flow_generates_fin_ack_and_close_event() {
+    CallbackContext context;
+    mirage_tcp::MirageTcp mirage_tcp = make_mirage_tcp(&context);
+    mirage_tcp::FiveTuple flow = make_flow();
+
+    std::vector<std::uint8_t> syn_packet = build_client_packet(flow, 1000, 0, true, false, false, std::vector<std::uint8_t>());
+    require(mirage_tcp.handle_incoming_ip_packet(&syn_packet[0], syn_packet.size()), "SYN should be accepted");
+    mirage_tcp::TcpSegment syn_ack = parse_tcp_from_ip(context.downstream_packets[0]);
+
+    std::vector<std::uint8_t> final_ack = build_client_packet(
+        flow,
+        1001,
+        syn_ack.sequence_number + 1,
+        false,
+        true,
+        false,
+        std::vector<std::uint8_t>());
+    require(mirage_tcp.handle_incoming_ip_packet(&final_ack[0], final_ack.size()), "final ACK should be accepted");
+
+    require(mirage_tcp.close_flow(flow), "close_flow should succeed");
+    require(context.downstream_packets.size() == 2, "close_flow should generate one FIN+ACK");
+    mirage_tcp::TcpSegment fin_ack = parse_tcp_from_ip(context.downstream_packets[1]);
+    require(fin_ack.fin, "close_flow response should include FIN");
+    require(fin_ack.ack, "close_flow response should include ACK");
+
+    std::vector<std::uint8_t> close_ack = build_client_packet(
+        flow,
+        1001,
+        fin_ack.sequence_number + 1,
+        false,
+        true,
+        false,
+        std::vector<std::uint8_t>());
+    require(mirage_tcp.handle_incoming_ip_packet(&close_ack[0], close_ack.size()), "final ACK for close should be accepted");
+    require(context.closed_flows.size() == 1, "close_flow should eventually emit close callback");
+}
+
+void test_incoming_rst_clears_flow() {
+    CallbackContext context;
+    mirage_tcp::MirageTcp mirage_tcp = make_mirage_tcp(&context);
+    mirage_tcp::FiveTuple flow = make_flow();
+
+    std::vector<std::uint8_t> syn_packet = build_client_packet(flow, 1000, 0, true, false, false, std::vector<std::uint8_t>());
+    require(mirage_tcp.handle_incoming_ip_packet(&syn_packet[0], syn_packet.size()), "SYN should be accepted");
+    mirage_tcp::TcpSegment syn_ack = parse_tcp_from_ip(context.downstream_packets[0]);
+
+    std::vector<std::uint8_t> final_ack = build_client_packet(
+        flow,
+        1001,
+        syn_ack.sequence_number + 1,
+        false,
+        true,
+        false,
+        std::vector<std::uint8_t>());
+    require(mirage_tcp.handle_incoming_ip_packet(&final_ack[0], final_ack.size()), "final ACK should be accepted");
+
+    std::vector<std::uint8_t> rst_packet = build_client_packet(
+        flow,
+        1001,
+        syn_ack.sequence_number + 1,
+        false,
+        true,
+        false,
+        std::vector<std::uint8_t>());
+    mirage_tcp::Ipv4Packet rst_ip;
+    std::string error_message;
+    require(mirage_tcp::parse_ipv4_packet(&rst_packet[0], rst_packet.size(), &rst_ip, &error_message), error_message);
+    mirage_tcp::TcpSegment rst_segment;
+    require(mirage_tcp::parse_tcp_segment(rst_ip.payload, &rst_segment, &error_message), error_message);
+    rst_segment.rst = true;
+    rst_ip.payload = mirage_tcp::serialize_tcp_segment(rst_segment);
+    rst_packet = mirage_tcp::serialize_ipv4_packet(rst_ip, &error_message);
+    require(!rst_packet.empty(), "RST packet serialization should succeed");
+
+    require(mirage_tcp.handle_incoming_ip_packet(&rst_packet[0], rst_packet.size()), "incoming RST should be accepted");
+    require(context.reset_flows.size() == 1, "incoming RST should emit reset callback");
+}
+
+void test_invalid_ack_resets_existing_flow() {
+    CallbackContext context;
+    mirage_tcp::MirageTcp mirage_tcp = make_mirage_tcp(&context);
+    mirage_tcp::FiveTuple flow = make_flow();
+
+    std::vector<std::uint8_t> syn_packet = build_client_packet(flow, 1000, 0, true, false, false, std::vector<std::uint8_t>());
+    require(mirage_tcp.handle_incoming_ip_packet(&syn_packet[0], syn_packet.size()), "SYN should be accepted");
+    mirage_tcp::TcpSegment syn_ack = parse_tcp_from_ip(context.downstream_packets[0]);
+
+    std::vector<std::uint8_t> final_ack = build_client_packet(
+        flow,
+        1001,
+        syn_ack.sequence_number + 100,
+        false,
+        true,
+        false,
+        std::vector<std::uint8_t>());
+    require(!mirage_tcp.handle_incoming_ip_packet(&final_ack[0], final_ack.size()), "invalid final ACK should fail");
+    require(context.reset_flows.size() == 1, "invalid final ACK should reset flow");
+    require(context.downstream_packets.size() == 2, "invalid final ACK should generate reset packet");
+    mirage_tcp::TcpSegment reset = parse_tcp_from_ip(context.downstream_packets[1]);
+    require(reset.rst, "invalid final ACK response should be RST");
+}
+
+}  // namespace
+
+int main() {
+    std::vector<TestCase> tests;
+    tests.push_back(TestCase{"ipv4_roundtrip", test_ipv4_roundtrip});
+    tests.push_back(TestCase{"syn_generates_downstream_syn_ack", test_syn_generates_downstream_syn_ack});
+    tests.push_back(TestCase{"final_ack_completes_handshake", test_final_ack_completes_handshake});
+    tests.push_back(TestCase{"payload_is_reported_and_acked", test_payload_is_reported_and_acked});
+    tests.push_back(TestCase{"fin_generates_fin_ack_and_close_event", test_fin_generates_fin_ack_and_close_event});
+    tests.push_back(TestCase{"invalid_flow_reports_error", test_invalid_flow_reports_error});
+    tests.push_back(TestCase{"send_downstream_payload_generates_data_segment", test_send_downstream_payload_generates_data_segment});
+    tests.push_back(TestCase{"close_flow_generates_fin_ack_and_close_event", test_close_flow_generates_fin_ack_and_close_event});
+    tests.push_back(TestCase{"incoming_rst_clears_flow", test_incoming_rst_clears_flow});
+    tests.push_back(TestCase{"invalid_ack_resets_existing_flow", test_invalid_ack_resets_existing_flow});
+
+    for (std::size_t i = 0; i < tests.size(); ++i) {
+        try {
+            tests[i].run();
+            std::cout << "[PASS] " << tests[i].name << std::endl;
+        } catch (const std::exception& error) {
+            std::cerr << "[FAIL] " << tests[i].name << ": " << error.what() << std::endl;
+            return 1;
+        }
+    }
+
+    std::cout << tests.size() << " tests passed" << std::endl;
+    return 0;
+}
