@@ -31,31 +31,40 @@ struct Ipv4Packet {
     Ipv4Packet();
 };
 
+enum Ipv4PacketErrorCode {
+    kIpv4PacketOk = 0,
+    kIpv4PacketNullPointer = 1,
+    kIpv4PacketTooShort = 2,
+    kIpv4PacketUnsupportedVersion = 3,
+    kIpv4PacketInvalidHeaderLength = 4,
+    kIpv4PacketInvalidTotalLength = 5,
+    kIpv4PacketFragmentUnsupported = 6,
+    kIpv4PacketSerializeTooLarge = 7
+};
+
 /**
  * @brief Parses one inbound IPv4 packet.
  *
  * @param packet Pointer to the raw IPv4 packet bytes.
  * @param packet_size Size of @p packet in bytes.
  * @param parsed_packet Output packet structure on success.
- * @param error_message Optional output error text on failure.
- * @return true if parsing succeeds; otherwise false.
+ * @return 0 if parsing succeeds; otherwise an error code.
  */
-bool parse_ipv4_packet(
+int parse_ipv4_packet(
     const void* packet,
     size_t packet_size,
-    Ipv4Packet* parsed_packet,
-    std::string* error_message);
+    Ipv4Packet* parsed_packet);
 
 /**
  * @brief Serializes an IPv4 packet and computes its header checksum.
  *
  * @param packet Parsed packet fields to serialize.
- * @param error_message Optional output error text on failure.
- * @return Serialized IPv4 packet bytes, or an empty vector on failure.
+ * @param bytes Output serialized IPv4 packet bytes on success.
+ * @return 0 if serialization succeeds; otherwise an error code.
  */
-std::vector<uint8_t> serialize_ipv4_packet(
+int serialize_ipv4_packet(
     const Ipv4Packet& packet,
-    std::string* error_message);
+    std::vector<uint8_t>* bytes);
 
 }  // namespace mirage_tcp
 

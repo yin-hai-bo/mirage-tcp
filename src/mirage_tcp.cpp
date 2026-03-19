@@ -120,22 +120,24 @@ MirageTcpCallbacks::MirageTcpCallbacks()
 MirageTcp::MirageTcp(const MirageTcpCallbacks& callbacks)
     : callbacks_(callbacks) {}
 
-bool MirageTcp::handle_incoming_ip_packet(const void* ip_packet, size_t ip_packet_size) {
+int MirageTcp::handle_incoming_ip_packet(const void* ip_packet, size_t ip_packet_size) {
     Ipv4Packet ipv4_packet;
-    std::string error_message;
-    if (!parse_ipv4_packet(ip_packet, ip_packet_size, &ipv4_packet, &error_message)) {
-        emit_error(error_message);
-        return false;
+    const int ipv4_parse_result = parse_ipv4_packet(ip_packet, ip_packet_size, &ipv4_packet);
+    if (ipv4_parse_result != kIpv4PacketOk) {
+        emit_error(kMirageTcpIpv4ParseFailed);
+        return kMirageTcpIpv4ParseFailed;
     }
+
     if (ipv4_packet.protocol != 6) {
-        emit_error("only TCP over IPv4 is supported");
-        return false;
+        emit_error(kMirageTcpProtocolUnsupported);
+        return kMirageTcpProtocolUnsupported;
     }
 
     TcpSegment tcp_segment;
-    if (!parse_tcp_segment(ipv4_packet.payload, &tcp_segment, &error_message)) {
-        emit_error(error_message);
-        return false;
+    const int tcp_parse_result = parse_tcp_segment(ipv4_packet.payload, &tcp_segment);
+    if (tcp_parse_result != kTcpSegmentOk) {
+        emit_error(kMirageTcpTcpParseFailed);
+        return kMirageTcpTcpParseFailed;
     }
 
     ConnectionInfo key;
@@ -149,12 +151,13 @@ bool MirageTcp::handle_incoming_ip_packet(const void* ip_packet, size_t ip_packe
     if (tcp_segment.syn && !tcp_segment.ack) {
         return handle_syn(key, tcp_segment.sequence_number);
     }
+
     if (it == ipv4_flows_.end()) {
         if (tcp_segment.rst) {
-            return true;
+            return kMirageTcpOk;
         }
-        emit_error("tcp flow not found");
-        return emit_reset_for_unhandled_packet(
+        emit_error(kMirageTcpFlowNotFound);
+        emit_reset_for_unhandled_packet(
             key,
             tcp_segment.sequence_number,
             tcp_segment.acknowledgment_number,
@@ -162,6 +165,7 @@ bool MirageTcp::handle_incoming_ip_packet(const void* ip_packet, size_t ip_packe
             tcp_segment.syn,
             tcp_segment.fin,
             tcp_segment.payload.size());
+        return kMirageTcpFlowNotFound;
     }
 
     Flow* flow = &it->second;
@@ -169,13 +173,14 @@ bool MirageTcp::handle_incoming_ip_packet(const void* ip_packet, size_t ip_packe
         const ConnectionInfo reset_flow = flow->connection_info;
         ipv4_flows_.erase(reset_flow);
         emit_reset(reset_flow);
-        return true;
+        return kMirageTcpOk;
     }
+
     if (flow->state == FlowState::kSynReceived) {
         if (!tcp_segment.ack || tcp_segment.acknowledgment_number != flow->server_next_sequence) {
             return fail_flow(
                 flow->connection_info,
-                "expected final ACK of three-way handshake",
+                kMirageTcpHandshakeFinalAckExpected,
                 tcp_segment.sequence_number,
                 tcp_segment.acknowledgment_number,
                 tcp_segment.ack,
@@ -183,10 +188,11 @@ bool MirageTcp::handle_incoming_ip_packet(const void* ip_packet, size_t ip_packe
                 tcp_segment.fin,
                 tcp_segment.payload.size());
         }
+
         if (tcp_segment.sequence_number != flow->client_next_sequence) {
             return fail_flow(
                 flow->connection_info,
-                "unexpected client sequence number during handshake completion",
+                kMirageTcpHandshakeClientSequenceUnexpected,
                 tcp_segment.sequence_number,
                 tcp_segment.acknowledgment_number,
                 tcp_segment.ack,
@@ -199,8 +205,9 @@ bool MirageTcp::handle_incoming_ip_packet(const void* ip_packet, size_t ip_packe
         if (callbacks_.on_tcp_handshake_completed != NULL) {
             callbacks_.on_tcp_handshake_completed(callbacks_.user_data, flow->connection_info);
         }
-        return true;
+        return kMirageTcpOk;
     }
+
     if (flow->state == FlowState::kEstablished) {
         return handle_established_packet(
             flow,
@@ -212,35 +219,37 @@ bool MirageTcp::handle_incoming_ip_packet(const void* ip_packet, size_t ip_packe
             tcp_segment.payload.empty() ? NULL : &tcp_segment.payload[0],
             tcp_segment.payload.size());
     }
+
     return handle_last_ack_packet(flow, tcp_segment.acknowledgment_number, tcp_segment.ack);
 }
 
-bool MirageTcp::send_downstream_tcp_payload(
+int MirageTcp::send_downstream_tcp_payload(
     const ConnectionInfo& connection_info,
     const void* payload,
     size_t payload_size) {
     if (payload == NULL || payload_size == 0) {
-        emit_error("send_downstream_tcp_payload requires a non-empty payload");
-        return false;
+        emit_error(kMirageTcpDownstreamPayloadEmpty);
+        return kMirageTcpDownstreamPayloadEmpty;
     }
 
     if (connection_info.ip_ver != 4) {
-        emit_error("send_downstream_tcp_payload currently only supports IPv4 flows");
-        return false;
+        emit_error(kMirageTcpIpv4OnlyOperation);
+        return kMirageTcpIpv4OnlyOperation;
     }
 
     std::map<ConnectionInfo, Flow>::iterator it = ipv4_flows_.find(connection_info);
     if (it == ipv4_flows_.end()) {
-        emit_error("cannot send downstream payload for unknown flow");
-        return false;
+        emit_error(kMirageTcpFlowNotFound);
+        return kMirageTcpFlowNotFound;
     }
+
     if (it->second.state != FlowState::kEstablished) {
-        emit_error("cannot send downstream payload before handshake completes");
-        return false;
+        emit_error(kMirageTcpSendBeforeEstablished);
+        return kMirageTcpSendBeforeEstablished;
     }
 
     Flow* flow = &it->second;
-    if (!emit_tcp_response(
+    const int emit_result = emit_tcp_response(
             flow->connection_info,
             flow->server_next_sequence,
             flow->client_next_sequence,
@@ -249,31 +258,33 @@ bool MirageTcp::send_downstream_tcp_payload(
             false,
             false,
             payload,
-            payload_size)) {
-        return false;
+            payload_size);
+    if (emit_result != kMirageTcpOk) {
+        return emit_result;
     }
     flow->server_next_sequence += static_cast<uint32_t>(payload_size);
-    return true;
+    return kMirageTcpOk;
 }
 
-bool MirageTcp::close_flow(const ConnectionInfo& connection_info) {
+int MirageTcp::close_flow(const ConnectionInfo& connection_info) {
     if (connection_info.ip_ver != 4) {
-        emit_error("close_flow currently only supports IPv4 flows");
-        return false;
+        emit_error(kMirageTcpIpv4OnlyOperation);
+        return kMirageTcpIpv4OnlyOperation;
     }
 
     std::map<ConnectionInfo, Flow>::iterator it = ipv4_flows_.find(connection_info);
     if (it == ipv4_flows_.end()) {
-        emit_error("cannot close unknown flow");
-        return false;
+        emit_error(kMirageTcpFlowNotFound);
+        return kMirageTcpFlowNotFound;
     }
+
     if (it->second.state != FlowState::kEstablished) {
-        emit_error("cannot close flow before handshake completes");
-        return false;
+        emit_error(kMirageTcpCloseBeforeEstablished);
+        return kMirageTcpCloseBeforeEstablished;
     }
 
     Flow* flow = &it->second;
-    if (!emit_tcp_response(
+    const int emit_result = emit_tcp_response(
             flow->connection_info,
             flow->server_next_sequence,
             flow->client_next_sequence,
@@ -282,17 +293,18 @@ bool MirageTcp::close_flow(const ConnectionInfo& connection_info) {
             true,
             false,
             NULL,
-            0)) {
-        return false;
+            0);
+    if (emit_result != kMirageTcpOk) {
+        return emit_result;
     }
     flow->server_next_sequence += 1;
     flow->state = FlowState::kLastAck;
-    return true;
+    return kMirageTcpOk;
 }
 
-void MirageTcp::emit_error(const std::string& message) const {
+void MirageTcp::emit_error(int error_code) const {
     if (callbacks_.on_error != NULL) {
-        callbacks_.on_error(callbacks_.user_data, message.c_str());
+        callbacks_.on_error(callbacks_.user_data, error_code);
     }
 }
 
@@ -308,7 +320,7 @@ void MirageTcp::emit_reset(const ConnectionInfo& connection_info) const {
     }
 }
 
-bool MirageTcp::handle_syn(const ConnectionInfo& connection_info, uint32_t client_sequence) {
+int MirageTcp::handle_syn(const ConnectionInfo& connection_info, uint32_t client_sequence) {
     Flow flow;
     flow.connection_info = connection_info;
     flow.state = FlowState::kSynReceived;
@@ -319,11 +331,11 @@ bool MirageTcp::handle_syn(const ConnectionInfo& connection_info, uint32_t clien
     std::pair<std::map<ConnectionInfo, Flow>::iterator, bool> inserted =
         ipv4_flows_.insert(std::make_pair(connection_info, flow));
     if (!inserted.second) {
-        emit_error("tcp flow already exists");
-        return false;
+        emit_error(kMirageTcpFlowAlreadyExists);
+        return kMirageTcpFlowAlreadyExists;
     }
 
-    if (!emit_tcp_response(
+    const int emit_result = emit_tcp_response(
             connection_info,
             flow.server_initial_sequence,
             flow.client_next_sequence,
@@ -332,14 +344,15 @@ bool MirageTcp::handle_syn(const ConnectionInfo& connection_info, uint32_t clien
             false,
             false,
             NULL,
-            0)) {
+            0);
+    if (emit_result != kMirageTcpOk) {
         ipv4_flows_.erase(connection_info);
-        return false;
+        return emit_result;
     }
-    return true;
+    return kMirageTcpOk;
 }
 
-bool MirageTcp::handle_established_packet(
+int MirageTcp::handle_established_packet(
     Flow* flow,
     uint32_t sequence_number,
     uint32_t acknowledgment_number,
@@ -352,12 +365,13 @@ bool MirageTcp::handle_established_packet(
         const ConnectionInfo reset_flow = flow->connection_info;
         ipv4_flows_.erase(reset_flow);
         emit_reset(reset_flow);
-        return true;
+        return kMirageTcpOk;
     }
+
     if (!ack_flag) {
         return fail_flow(
             flow->connection_info,
-            "client packet in ESTABLISHED must carry ACK",
+            kMirageTcpEstablishedAckRequired,
             sequence_number,
             acknowledgment_number,
             ack_flag,
@@ -365,10 +379,11 @@ bool MirageTcp::handle_established_packet(
             fin_flag,
             payload_size);
     }
+
     if (acknowledgment_number != flow->server_next_sequence) {
         return fail_flow(
             flow->connection_info,
-            "client acknowledgment number does not match current server sequence",
+            kMirageTcpEstablishedAckNumberUnexpected,
             sequence_number,
             acknowledgment_number,
             ack_flag,
@@ -376,10 +391,11 @@ bool MirageTcp::handle_established_packet(
             fin_flag,
             payload_size);
     }
+
     if (sequence_number != flow->client_next_sequence) {
         return fail_flow(
             flow->connection_info,
-            "unexpected client sequence number",
+            kMirageTcpEstablishedSequenceUnexpected,
             sequence_number,
             acknowledgment_number,
             ack_flag,
@@ -412,7 +428,7 @@ bool MirageTcp::handle_established_packet(
     if (fin_flag) {
         flow->client_next_sequence += 1;
         flow->state = FlowState::kLastAck;
-        if (!emit_tcp_response(
+        const int emit_result = emit_tcp_response(
                 flow->connection_info,
                 flow->server_next_sequence,
                 flow->client_next_sequence,
@@ -421,24 +437,25 @@ bool MirageTcp::handle_established_packet(
                 true,
                 false,
                 NULL,
-                0)) {
-            return false;
+                0);
+        if (emit_result != kMirageTcpOk) {
+            return emit_result;
         }
         flow->server_next_sequence += 1;
-        return true;
+        return kMirageTcpOk;
     }
 
-    return true;
+    return kMirageTcpOk;
 }
 
-bool MirageTcp::handle_last_ack_packet(
+int MirageTcp::handle_last_ack_packet(
     Flow* flow,
     uint32_t acknowledgment_number,
     bool ack_flag) {
     if (!ack_flag) {
         return fail_flow(
             flow->connection_info,
-            "expected final ACK for locally terminated close",
+            kMirageTcpCloseFinalAckExpected,
             0,
             acknowledgment_number,
             false,
@@ -446,10 +463,11 @@ bool MirageTcp::handle_last_ack_packet(
             false,
             0);
     }
+
     if (acknowledgment_number != flow->server_next_sequence) {
         return fail_flow(
             flow->connection_info,
-            "unexpected acknowledgment for local FIN",
+            kMirageTcpCloseAckUnexpected,
             0,
             acknowledgment_number,
             true,
@@ -463,10 +481,10 @@ bool MirageTcp::handle_last_ack_packet(
     if (callbacks_.on_tcp_connection_closed != NULL) {
         callbacks_.on_tcp_connection_closed(callbacks_.user_data, completed_flow);
     }
-    return true;
+    return kMirageTcpOk;
 }
 
-bool MirageTcp::emit_reset_for_unhandled_packet(
+int MirageTcp::emit_reset_for_unhandled_packet(
     const ConnectionInfo& connection_info,
     uint32_t sequence_number,
     uint32_t acknowledgment_number,
@@ -506,16 +524,16 @@ bool MirageTcp::emit_reset_for_unhandled_packet(
         0);
 }
 
-bool MirageTcp::fail_flow(
+int MirageTcp::fail_flow(
     const ConnectionInfo& connection_info,
-    const std::string& message,
+    int error_code,
     uint32_t sequence_number,
     uint32_t acknowledgment_number,
     bool ack_flag,
     bool syn_flag,
     bool fin_flag,
     size_t payload_size) {
-    emit_error(message);
+    emit_error(error_code);
     ipv4_flows_.erase(connection_info);
     emit_reset_for_unhandled_packet(
         connection_info,
@@ -526,10 +544,10 @@ bool MirageTcp::fail_flow(
         fin_flag,
         payload_size);
     emit_reset(connection_info);
-    return false;
+    return error_code;
 }
 
-bool MirageTcp::emit_tcp_response(
+int MirageTcp::emit_tcp_response(
     const ConnectionInfo& connection_info,
     uint32_t sequence_number,
     uint32_t acknowledgment_number,
@@ -555,14 +573,14 @@ bool MirageTcp::emit_tcp_response(
         payload,
         payload_size);
 
-    std::string error_message;
-    std::vector<uint8_t> ipv4_bytes = serialize_ipv4_packet(packet, &error_message);
-    if (ipv4_bytes.empty()) {
-        emit_error(error_message);
-        return false;
+    std::vector<uint8_t> ipv4_bytes;
+    const int serialize_result = serialize_ipv4_packet(packet, &ipv4_bytes);
+    if (serialize_result != kIpv4PacketOk) {
+        emit_error(kMirageTcpPacketEmitFailed);
+        return kMirageTcpPacketEmitFailed;
     }
     emit_downstream_ip_packet(&ipv4_bytes[0], ipv4_bytes.size());
-    return true;
+    return kMirageTcpOk;
 }
 
 }  // namespace mirage_tcp

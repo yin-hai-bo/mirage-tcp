@@ -3,7 +3,6 @@
 
 #include <cstdint>
 
-#include <string>
 #include <vector>
 
 namespace mirage_tcp {
@@ -40,18 +39,24 @@ struct TcpSegment {
     TcpSegment();
 };
 
+enum TcpSegmentErrorCode {
+    kTcpSegmentOk = 0,
+    kTcpSegmentNullPointer = 1,
+    kTcpSegmentTooShort = 2,
+    kTcpSegmentInvalidDataOffset = 3,
+    kTcpSegmentHeaderTooLong = 4
+};
+
 /**
  * @brief Parses one TCP segment without options.
  *
  * @param bytes Raw TCP segment bytes.
  * @param segment Output segment structure on success.
- * @param error_message Optional output error text on failure.
- * @return true if parsing succeeds; otherwise false.
+ * @return 0 if parsing succeeds; otherwise an error code.
  */
-bool parse_tcp_segment(
+int parse_tcp_segment(
     const std::vector<uint8_t>& bytes,
-    TcpSegment* segment,
-    std::string* error_message);
+    TcpSegment* segment);
 
 /**
  * @brief Serializes one TCP segment without checksum calculation.

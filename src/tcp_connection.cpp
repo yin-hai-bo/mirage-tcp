@@ -34,10 +34,10 @@ TcpConnection::TcpConnection(
       peer_closed_(false),
       time_wait_remaining_ms_(0) {}
 
-bool TcpConnection::connect(uint16_t remote_port) {
+int TcpConnection::connect(uint16_t remote_port) {
     if (state_ != TcpState::kClosed) {
-        emit_error("connect() is only allowed in CLOSED");
-        return false;
+        emit_error(kTcpConnectionConnectInvalidState);
+        return kTcpConnectionConnectInvalidState;
     }
 
     remote_port_ = remote_port;
@@ -50,41 +50,43 @@ bool TcpConnection::connect(uint16_t remote_port) {
     send_next_ = initial_sequence_number_;
     queue_control_segment(true, false, false, false);
     set_state(TcpState::kSynSent);
-    return true;
+    return kTcpConnectionOk;
 }
 
-bool TcpConnection::write(const std::vector<uint8_t>& data) {
+int TcpConnection::write(const std::vector<uint8_t>& data) {
     if (state_ != TcpState::kEstablished) {
-        emit_error("write() is only allowed in ESTABLISHED");
-        return false;
+        emit_error(kTcpConnectionWriteInvalidState);
+        return kTcpConnectionWriteInvalidState;
     }
+
     if (close_requested_ || peer_closed_) {
-        emit_error("write() is not allowed after close has started");
-        return false;
+        emit_error(kTcpConnectionWriteAfterClose);
+        return kTcpConnectionWriteAfterClose;
     }
+
     if (data.empty()) {
-        return true;
+        return kTcpConnectionOk;
     }
 
     queue_payload_segment(data);
-    return true;
+    return kTcpConnectionOk;
 }
 
-bool TcpConnection::close() {
+int TcpConnection::close() {
     if (state_ != TcpState::kEstablished && state_ != TcpState::kFinWait1 && state_ != TcpState::kFinWait2) {
-        emit_error("close() is not allowed in the current state");
-        return false;
+        emit_error(kTcpConnectionCloseInvalidState);
+        return kTcpConnectionCloseInvalidState;
     }
 
     close_requested_ = true;
     maybe_send_queued_fin();
-    return true;
+    return kTcpConnectionOk;
 }
 
-bool TcpConnection::push_incoming_segment(const TcpSegment& segment) {
+int TcpConnection::push_incoming_segment(const TcpSegment& segment) {
     if (!matches_peer(segment)) {
-        emit_error("incoming segment does not match the configured peer");
-        return false;
+        emit_error(kTcpConnectionPeerMismatch);
+        return kTcpConnectionPeerMismatch;
     }
 
     if (segment.rst) {
@@ -93,8 +95,8 @@ bool TcpConnection::push_incoming_segment(const TcpSegment& segment) {
 
     switch (state_) {
         case TcpState::kClosed:
-            emit_error("received segment while CLOSED");
-            return false;
+            emit_error(kTcpConnectionClosedState);
+            return kTcpConnectionClosedState;
         case TcpState::kSynSent:
             return handle_syn_sent(segment);
         case TcpState::kEstablished:
@@ -109,17 +111,18 @@ bool TcpConnection::push_incoming_segment(const TcpSegment& segment) {
             if (segment.fin) {
                 queue_ack();
             }
-            return true;
+            return kTcpConnectionOk;
     }
 
-    emit_error("unhandled state");
-    return false;
+    emit_error(kTcpConnectionUnhandledState);
+    return kTcpConnectionUnhandledState;
 }
 
-bool TcpConnection::push_incoming_bytes(const std::vector<uint8_t>& bytes, std::string* error_message) {
+int TcpConnection::push_incoming_bytes(const std::vector<uint8_t>& bytes) {
     TcpSegment segment;
-    if (!parse_tcp_segment(bytes, &segment, error_message)) {
-        return false;
+    const int parse_result = parse_tcp_segment(bytes, &segment);
+    if (parse_result != kTcpSegmentOk) {
+        return kTcpConnectionSegmentParseFailed;
     }
     return push_incoming_segment(segment);
 }
@@ -132,7 +135,7 @@ void TcpConnection::tick(uint32_t elapsed_ms) {
     if (elapsed_ms >= time_wait_remaining_ms_) {
         time_wait_remaining_ms_ = 0;
         set_state(TcpState::kClosed);
-        emit_closed("TIME-WAIT expired");
+        emit_closed(kTcpConnectionTimeWaitExpired);
         return;
     }
 
@@ -176,22 +179,23 @@ void TcpConnection::set_state(TcpState new_state) {
     ConnectionEvent event;
     event.type = ConnectionEventType::kStateChanged;
     event.state = new_state;
+    event.event_code = kTcpConnectionOk;
     events_.push_back(event);
 }
 
-void TcpConnection::emit_error(const std::string& message) {
+void TcpConnection::emit_error(int error_code) {
     ConnectionEvent event;
     event.type = ConnectionEventType::kError;
     event.state = state_;
-    event.message = message;
+    event.event_code = error_code;
     events_.push_back(event);
 }
 
-void TcpConnection::emit_closed(const std::string& message) {
+void TcpConnection::emit_closed(int event_code) {
     ConnectionEvent event;
     event.type = ConnectionEventType::kConnectionClosed;
     event.state = state_;
-    event.message = message;
+    event.event_code = event_code;
     events_.push_back(event);
 }
 
@@ -304,33 +308,34 @@ bool TcpConnection::matches_peer(const TcpSegment& segment) const {
            segment.source_port == remote_port_;
 }
 
-bool TcpConnection::handle_reset() {
+int TcpConnection::handle_reset() {
     pending_transmissions_.clear();
     close_requested_ = true;
     peer_closed_ = true;
     set_state(TcpState::kClosed);
-    emit_closed("peer reset the connection");
-    return true;
+    emit_closed(kTcpConnectionClosedByReset);
+    return kTcpConnectionOk;
 }
 
-bool TcpConnection::handle_syn_sent(const TcpSegment& segment) {
+int TcpConnection::handle_syn_sent(const TcpSegment& segment) {
     if (!segment.syn || !segment.ack) {
-        emit_error("expected SYN+ACK while in SYN-SENT");
-        return false;
+        emit_error(kTcpConnectionSynAckExpected);
+        return kTcpConnectionSynAckExpected;
     }
+
     if (segment.acknowledgment_number != send_next_) {
-        emit_error("unexpected acknowledgment number in SYN-SENT");
-        return false;
+        emit_error(kTcpConnectionAckUnexpected);
+        return kTcpConnectionAckUnexpected;
     }
 
     handle_ack(segment.acknowledgment_number);
     receive_next_ = segment.sequence_number + 1;
     queue_ack();
     set_state(TcpState::kEstablished);
-    return true;
+    return kTcpConnectionOk;
 }
 
-bool TcpConnection::handle_established(const TcpSegment& segment) {
+int TcpConnection::handle_established(const TcpSegment& segment) {
     if (segment.ack) {
         handle_ack(segment.acknowledgment_number);
     }
@@ -338,8 +343,8 @@ bool TcpConnection::handle_established(const TcpSegment& segment) {
     if (!segment.payload.empty()) {
         if (segment.sequence_number != receive_next_) {
             queue_ack();
-            emit_error("out-of-order payload is not supported");
-            return false;
+            emit_error(kTcpConnectionPayloadOutOfOrder);
+            return kTcpConnectionPayloadOutOfOrder;
         }
 
         receive_next_ += static_cast<uint32_t>(segment.payload.size());
@@ -347,14 +352,15 @@ bool TcpConnection::handle_established(const TcpSegment& segment) {
         event.type = ConnectionEventType::kDataReceived;
         event.state = state_;
         event.data = segment.payload;
+        event.event_code = kTcpConnectionOk;
         events_.push_back(event);
         queue_ack();
     }
 
     if (segment.fin) {
         if (segment.sequence_number + static_cast<uint32_t>(segment.payload.size()) != receive_next_) {
-            emit_error("unexpected FIN sequence");
-            return false;
+            emit_error(kTcpConnectionFinSequenceUnexpected);
+            return kTcpConnectionFinSequenceUnexpected;
         }
 
         peer_closed_ = true;
@@ -362,13 +368,13 @@ bool TcpConnection::handle_established(const TcpSegment& segment) {
         queue_ack();
         set_state(TcpState::kTimeWait);
         time_wait_remaining_ms_ = 2000;
-        emit_closed("peer sent FIN before local close completed");
+        emit_closed(kTcpConnectionClosedByPeerFin);
     }
 
-    return true;
+    return kTcpConnectionOk;
 }
 
-bool TcpConnection::handle_fin_wait_1(const TcpSegment& segment) {
+int TcpConnection::handle_fin_wait_1(const TcpSegment& segment) {
     if (segment.ack) {
         handle_ack(segment.acknowledgment_number);
     }
@@ -376,8 +382,8 @@ bool TcpConnection::handle_fin_wait_1(const TcpSegment& segment) {
     if (!segment.payload.empty()) {
         if (segment.sequence_number != receive_next_) {
             queue_ack();
-            emit_error("out-of-order payload is not supported");
-            return false;
+            emit_error(kTcpConnectionPayloadOutOfOrder);
+            return kTcpConnectionPayloadOutOfOrder;
         }
 
         receive_next_ += static_cast<uint32_t>(segment.payload.size());
@@ -385,14 +391,15 @@ bool TcpConnection::handle_fin_wait_1(const TcpSegment& segment) {
         event.type = ConnectionEventType::kDataReceived;
         event.state = state_;
         event.data = segment.payload;
+        event.event_code = kTcpConnectionOk;
         events_.push_back(event);
         queue_ack();
     }
 
     if (segment.fin) {
         if (segment.sequence_number + static_cast<uint32_t>(segment.payload.size()) != receive_next_) {
-            emit_error("unexpected FIN sequence");
-            return false;
+            emit_error(kTcpConnectionFinSequenceUnexpected);
+            return kTcpConnectionFinSequenceUnexpected;
         }
 
         ++receive_next_;
@@ -404,10 +411,10 @@ bool TcpConnection::handle_fin_wait_1(const TcpSegment& segment) {
         }
     }
 
-    return true;
+    return kTcpConnectionOk;
 }
 
-bool TcpConnection::handle_fin_wait_2(const TcpSegment& segment) {
+int TcpConnection::handle_fin_wait_2(const TcpSegment& segment) {
     if (segment.ack) {
         handle_ack(segment.acknowledgment_number);
     }
@@ -415,8 +422,8 @@ bool TcpConnection::handle_fin_wait_2(const TcpSegment& segment) {
     if (segment.fin) {
         if (segment.sequence_number != receive_next_) {
             queue_ack();
-            emit_error("unexpected FIN sequence");
-            return false;
+            emit_error(kTcpConnectionFinSequenceUnexpected);
+            return kTcpConnectionFinSequenceUnexpected;
         }
 
         ++receive_next_;
@@ -424,10 +431,10 @@ bool TcpConnection::handle_fin_wait_2(const TcpSegment& segment) {
         enter_time_wait();
     }
 
-    return true;
+    return kTcpConnectionOk;
 }
 
-bool TcpConnection::handle_closing(const TcpSegment& segment) {
+int TcpConnection::handle_closing(const TcpSegment& segment) {
     if (segment.ack) {
         handle_ack(segment.acknowledgment_number);
     }
@@ -436,7 +443,7 @@ bool TcpConnection::handle_closing(const TcpSegment& segment) {
         queue_ack();
     }
 
-    return true;
+    return kTcpConnectionOk;
 }
 
 void TcpConnection::enter_time_wait() {

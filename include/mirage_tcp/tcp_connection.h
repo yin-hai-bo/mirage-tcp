@@ -4,7 +4,6 @@
 #include <cstddef>
 #include <cstdint>
 
-#include <string>
 #include <vector>
 
 #include "mirage_tcp/tcp_segment.h"
@@ -38,6 +37,25 @@ enum class ConnectionEventType {
     kError
 };
 
+enum TcpConnectionErrorCode {
+    kTcpConnectionOk = 0,
+    kTcpConnectionConnectInvalidState = 1,
+    kTcpConnectionWriteInvalidState = 2,
+    kTcpConnectionWriteAfterClose = 3,
+    kTcpConnectionCloseInvalidState = 4,
+    kTcpConnectionPeerMismatch = 5,
+    kTcpConnectionClosedState = 6,
+    kTcpConnectionUnhandledState = 7,
+    kTcpConnectionSynAckExpected = 8,
+    kTcpConnectionAckUnexpected = 9,
+    kTcpConnectionPayloadOutOfOrder = 10,
+    kTcpConnectionFinSequenceUnexpected = 11,
+    kTcpConnectionSegmentParseFailed = 12,
+    kTcpConnectionClosedByReset = 13,
+    kTcpConnectionClosedByPeerFin = 14,
+    kTcpConnectionTimeWaitExpired = 15
+};
+
 /**
  * @brief One serialized outbound TCP segment with its parsed fields.
  */
@@ -53,7 +71,7 @@ struct ConnectionEvent {
     ConnectionEventType type;
     TcpState state;
     std::vector<uint8_t> data;
-    std::string message;
+    int event_code;
 };
 
 /**
@@ -77,41 +95,40 @@ public:
      * @brief Starts an active open by emitting a SYN.
      *
      * @param remote_port Peer TCP port.
-     * @return true if the connect attempt is started; otherwise false.
+     * @return 0 if the connect attempt is started; otherwise an error code.
      */
-    bool connect(uint16_t remote_port);
+    int connect(uint16_t remote_port);
 
     /**
      * @brief Queues payload for transmission on an established connection.
      *
      * @param data Payload bytes to send.
-     * @return true if the payload is accepted; otherwise false.
+     * @return 0 if the payload is accepted; otherwise an error code.
      */
-    bool write(const std::vector<uint8_t>& data);
+    int write(const std::vector<uint8_t>& data);
 
     /**
      * @brief Starts a local close when allowed by the current state.
      *
-     * @return true if close processing is started; otherwise false.
+     * @return 0 if close processing is started; otherwise an error code.
      */
-    bool close();
+    int close();
 
     /**
      * @brief Pushes one parsed inbound TCP segment into the state machine.
      *
      * @param segment Parsed TCP segment from the peer.
-     * @return true if the segment is accepted; otherwise false.
+     * @return 0 if the segment is accepted; otherwise an error code.
      */
-    bool push_incoming_segment(const TcpSegment& segment);
+    int push_incoming_segment(const TcpSegment& segment);
 
     /**
      * @brief Parses and pushes one inbound TCP segment.
      *
      * @param bytes Raw TCP segment bytes.
-     * @param error_message Optional output error text on parse failure.
-     * @return true if the bytes are accepted; otherwise false.
+     * @return 0 if the bytes are accepted; otherwise an error code.
      */
-    bool push_incoming_bytes(const std::vector<uint8_t>& bytes, std::string* error_message);
+    int push_incoming_bytes(const std::vector<uint8_t>& bytes);
 
     /**
      * @brief Advances timer-driven state such as TIME-WAIT expiration.
@@ -155,9 +172,9 @@ private:
 
     void set_state(TcpState new_state);
 
-    void emit_error(const std::string& message);
+    void emit_error(int error_code);
 
-    void emit_closed(const std::string& message);
+    void emit_closed(int event_code);
 
     void queue_segment(const TcpSegment& segment);
 
@@ -173,17 +190,17 @@ private:
 
     bool matches_peer(const TcpSegment& segment) const;
 
-    bool handle_reset();
+    int handle_reset();
 
-    bool handle_syn_sent(const TcpSegment& segment);
+    int handle_syn_sent(const TcpSegment& segment);
 
-    bool handle_established(const TcpSegment& segment);
+    int handle_established(const TcpSegment& segment);
 
-    bool handle_fin_wait_1(const TcpSegment& segment);
+    int handle_fin_wait_1(const TcpSegment& segment);
 
-    bool handle_fin_wait_2(const TcpSegment& segment);
+    int handle_fin_wait_2(const TcpSegment& segment);
 
-    bool handle_closing(const TcpSegment& segment);
+    int handle_closing(const TcpSegment& segment);
 
     void enter_time_wait();
 

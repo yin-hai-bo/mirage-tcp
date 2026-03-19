@@ -12,7 +12,7 @@
 - 数据包拦截与重新注入由宿主应用负责，例如通过 `WinTun`。
 - `MirageTCP` 负责：
   - 解析入站 `IPv4/TCP packet`
-  - 基于五元组跟踪流
+  - 基于 `ConnectionInfo` 跟踪流
   - 模拟被动侧 TCP 握手和最小连接生命周期
   - 生成下行伪造 `IPv4/TCP packet`
   - 通过回调暴露连接生命周期与负载事件
@@ -25,7 +25,9 @@
   - `handle_incoming_ip_packet(...)`
   - `send_downstream_tcp_payload(...)`
   - `close_flow(...)`
-- 流通过 `FiveTuple` 标识。
+- 流通过 `ConnectionInfo` 标识。
+- `ConnectionInfo` 使用内部 `Address union` 承载 `in_addr` / `in6_addr`，并用 `ip_ver` 标识 `IPv4` 或 `IPv6`。
+- 当前公共连接标识按双栈形式设计，但协议实现仍以 `IPv4/TCP` 为主。
 
 ## 命名规则
 
@@ -41,6 +43,10 @@
 - 修改应保持最小且局部化；没有必要时不要重写已经工作的协议路径。
 - 优先使用简单状态迁移，而不是为了“完整性”做推测式实现。
 - 当前阶段，应优先保证本地终止路径的正确性，而不是广泛覆盖 TCP 特性。
+- 对外和热路径上的“成功/失败”接口统一使用 `int error code`，`0` 表示成功；不要用 `bool` 表示是否成功。
+- 不要为错误返回设计 `std::string` 或 message out 参数；调用方应基于错误码枚举处理。
+- `MirageTcpCallbacks::on_error` 只传 `int error_code`。
+- `TcpConnection::ConnectionEvent` 只使用 `event_code` 表达错误或关闭原因，不携带 message 字符串。
 
 ## 协议约束
 

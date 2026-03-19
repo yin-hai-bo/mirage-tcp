@@ -53,55 +53,38 @@ Ipv4Packet::Ipv4Packet()
       protocol(0),
       ttl(64) {}
 
-bool parse_ipv4_packet(
+int parse_ipv4_packet(
     const void* packet,
     size_t packet_size,
-    Ipv4Packet* parsed_packet,
-    std::string* error_message) {
+    Ipv4Packet* parsed_packet) {
     if (packet == NULL || parsed_packet == NULL) {
-        if (error_message != NULL) {
-            *error_message = "ipv4 packet parse requires non-null pointers";
-        }
-        return false;
+        return kIpv4PacketNullPointer;
     }
+
     if (packet_size < 20) {
-        if (error_message != NULL) {
-            *error_message = "ipv4 packet must be at least 20 bytes";
-        }
-        return false;
+        return kIpv4PacketTooShort;
     }
 
     const uint8_t* bytes = static_cast<const uint8_t*>(packet);
     const uint8_t version = static_cast<uint8_t>(bytes[0] >> 4);
     const uint8_t ihl_words = static_cast<uint8_t>(bytes[0] & 0x0fU);
     if (version != 4) {
-        if (error_message != NULL) {
-            *error_message = "only IPv4 packets are supported";
-        }
-        return false;
+        return kIpv4PacketUnsupportedVersion;
     }
+
     if (ihl_words < 5) {
-        if (error_message != NULL) {
-            *error_message = "ipv4 header length must be at least 5 words";
-        }
-        return false;
+        return kIpv4PacketInvalidHeaderLength;
     }
 
     const size_t header_size = static_cast<size_t>(ihl_words) * 4U;
     const uint16_t total_length = read_u16_be(bytes + 2);
     if (total_length < header_size || total_length > packet_size) {
-        if (error_message != NULL) {
-            *error_message = "ipv4 total length is invalid";
-        }
-        return false;
+        return kIpv4PacketInvalidTotalLength;
     }
 
     const uint16_t flags_and_fragment = read_u16_be(bytes + 6);
     if ((flags_and_fragment & 0x1fffU) != 0U) {
-        if (error_message != NULL) {
-            *error_message = "fragmented ipv4 packets are not supported";
-        }
-        return false;
+        return kIpv4PacketFragmentUnsupported;
     }
 
     Ipv4Packet result;
@@ -113,42 +96,37 @@ bool parse_ipv4_packet(
         bytes + static_cast<std::ptrdiff_t>(header_size),
         bytes + static_cast<std::ptrdiff_t>(total_length));
     *parsed_packet = result;
-
-    if (error_message != NULL) {
-        error_message->clear();
-    }
-    return true;
+    return kIpv4PacketOk;
 }
 
-std::vector<uint8_t> serialize_ipv4_packet(
+int serialize_ipv4_packet(
     const Ipv4Packet& packet,
-    std::string* error_message) {
+    std::vector<uint8_t>* bytes) {
+    if (bytes == NULL) {
+        return kIpv4PacketNullPointer;
+    }
+
     const size_t header_size = 20;
     const size_t total_size = header_size + packet.payload.size();
     if (total_size > 0xffffU) {
-        if (error_message != NULL) {
-            *error_message = "ipv4 packet too large";
-        }
-        return std::vector<uint8_t>();
+        return kIpv4PacketSerializeTooLarge;
     }
 
-    std::vector<uint8_t> bytes(total_size, 0);
-    bytes[0] = 0x45;
-    write_u16_be(static_cast<uint16_t>(total_size), &bytes[2]);
-    bytes[8] = packet.ttl;
-    bytes[9] = packet.protocol;
-    write_u32_be(packet.source_address, &bytes[12]);
-    write_u32_be(packet.destination_address, &bytes[16]);
-    write_u16_be(internet_checksum(&bytes[0], header_size), &bytes[10]);
+    std::vector<uint8_t> serialized_bytes(total_size, 0);
+    serialized_bytes[0] = 0x45;
+    write_u16_be(static_cast<uint16_t>(total_size), &serialized_bytes[2]);
+    serialized_bytes[8] = packet.ttl;
+    serialized_bytes[9] = packet.protocol;
+    write_u32_be(packet.source_address, &serialized_bytes[12]);
+    write_u32_be(packet.destination_address, &serialized_bytes[16]);
+    write_u16_be(internet_checksum(&serialized_bytes[0], header_size), &serialized_bytes[10]);
 
     for (size_t i = 0; i < packet.payload.size(); ++i) {
-        bytes[header_size + i] = packet.payload[i];
+        serialized_bytes[header_size + i] = packet.payload[i];
     }
 
-    if (error_message != NULL) {
-        error_message->clear();
-    }
-    return bytes;
+    *bytes = serialized_bytes;
+    return kIpv4PacketOk;
 }
 
 }  // namespace mirage_tcp

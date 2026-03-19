@@ -9,6 +9,25 @@
 - 通过回调把 `MirageTCP` 伪造出的下行 `IPv4 packet` 通知给调用方。
 - 基于 `ConnectionInfo` 维护多个被接管的 `TCP flow`。
 
+## 当前 API 约定
+
+- 对外连接标识统一使用 `ConnectionInfo`。
+- `ConnectionInfo` 同时承载 `IPv4` 和 `IPv6` 地址：
+  `client_ip` / `server_ip` 使用内部 `Address union` 保存 `in_addr` 或 `in6_addr`，
+  `ip_ver` 使用 `4` 或 `6` 标识当前地址族。
+- 当前实现仍然只处理 `IPv4/TCP`，但公共连接标识已经按双栈形式预留。
+- `handle_incoming_ip_packet(...)`、`send_downstream_tcp_payload(...)`、`close_flow(...)` 返回 `int error code`，`0` 表示成功。
+- `MirageTcpCallbacks::on_error` 只上报 `int error_code`。
+
+## 错误处理约定
+
+- `kMirageTcpOk`、`kIpv4PacketOk`、`kTcpSegmentOk`、`kTcpConnectionOk` 都表示成功。
+- 失败时，调用方应按对应模块的错误码枚举处理，而不是依赖字符串匹配。
+- `MirageTcp` 的对外操作错误码定义在 `MirageTcpErrorCode`。
+- `IPv4 packet` 解析与序列化错误码定义在 `Ipv4PacketErrorCode`。
+- `TCP segment` 解析错误码定义在 `TcpSegmentErrorCode`。
+- `TcpConnection` 的状态机错误与关闭原因定义在 `TcpConnectionErrorCode`。
+
 ## v1 已支持
 
 - 本机 outbound `SYN` 被接管后，库内生成 downstream `SYN+ACK`。
@@ -52,9 +71,15 @@ mirage_tcp::MirageTcpCallbacks callbacks;
 callbacks.on_downstream_ip_packet_generated = my_packet_callback;
 callbacks.on_tcp_handshake_completed = my_handshake_callback;
 callbacks.on_tcp_connection_reset = my_reset_callback;
+callbacks.on_error = my_error_code_callback;
 
 mirage_tcp::MirageTcp mirage_tcp(callbacks);
-mirage_tcp.handle_incoming_ip_packet(ip_packet, ip_packet_size);
+int result = mirage_tcp.handle_incoming_ip_packet(ip_packet, ip_packet_size);
+
+if (result != mirage_tcp::kMirageTcpOk) {
+    // 按 error code 处理错误。
+}
+
 mirage_tcp::ConnectionInfo connection_info;
 mirage_tcp.send_downstream_tcp_payload(connection_info, payload, payload_size);
 mirage_tcp.close_flow(connection_info);

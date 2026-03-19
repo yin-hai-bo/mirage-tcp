@@ -5,7 +5,6 @@
 #include <cstdint>
 
 #include <map>
-#include <string>
 
 #if defined(_WIN32)
 #include <winsock2.h>
@@ -75,7 +74,28 @@ typedef void (*TcpConnectionResetCallback)(
 
 typedef void (*MirageTcpErrorCallback)(
     void* user_data,
-    const char* message);
+    int error_code);
+
+enum MirageTcpErrorCode {
+    kMirageTcpOk = 0,
+    kMirageTcpIpv4ParseFailed = 1,
+    kMirageTcpProtocolUnsupported = 2,
+    kMirageTcpTcpParseFailed = 3,
+    kMirageTcpHandshakeFinalAckExpected = 4,
+    kMirageTcpHandshakeClientSequenceUnexpected = 5,
+    kMirageTcpFlowNotFound = 6,
+    kMirageTcpFlowAlreadyExists = 7,
+    kMirageTcpEstablishedAckRequired = 8,
+    kMirageTcpEstablishedAckNumberUnexpected = 9,
+    kMirageTcpEstablishedSequenceUnexpected = 10,
+    kMirageTcpCloseFinalAckExpected = 11,
+    kMirageTcpCloseAckUnexpected = 12,
+    kMirageTcpDownstreamPayloadEmpty = 13,
+    kMirageTcpIpv4OnlyOperation = 14,
+    kMirageTcpSendBeforeEstablished = 15,
+    kMirageTcpCloseBeforeEstablished = 16,
+    kMirageTcpPacketEmitFailed = 17
+};
 
 /**
  * @brief Host-provided callbacks used to observe MirageTCP output.
@@ -115,9 +135,9 @@ public:
      *
      * @param ip_packet Pointer to raw IPv4 packet bytes.
      * @param ip_packet_size Size of @p ip_packet in bytes.
-     * @return true if the packet is accepted; otherwise false.
+     * @return 0 if the packet is accepted; otherwise an error code.
      */
-    bool handle_incoming_ip_packet(const void* ip_packet, size_t ip_packet_size);
+    int handle_incoming_ip_packet(const void* ip_packet, size_t ip_packet_size);
 
     /**
      * @brief Emits one downstream TCP payload segment on an established flow.
@@ -125,9 +145,9 @@ public:
      * @param connection_info Flow identifier.
      * @param payload Pointer to payload bytes.
      * @param payload_size Size of @p payload in bytes.
-     * @return true if the payload is emitted; otherwise false.
+     * @return 0 if the payload is emitted; otherwise an error code.
      */
-    bool send_downstream_tcp_payload(
+    int send_downstream_tcp_payload(
         const ConnectionInfo& connection_info,
         const void* payload,
         size_t payload_size);
@@ -136,9 +156,9 @@ public:
      * @brief Starts a local close by emitting FIN+ACK for an established flow.
      *
      * @param connection_info Flow identifier.
-     * @return true if close initiation succeeds; otherwise false.
+     * @return 0 if close initiation succeeds; otherwise an error code.
      */
-    bool close_flow(const ConnectionInfo& connection_info);
+    int close_flow(const ConnectionInfo& connection_info);
 
 private:
     enum class FlowState {
@@ -155,15 +175,15 @@ private:
         uint32_t server_next_sequence;
     };
 
-    void emit_error(const std::string& message) const;
+    void emit_error(int error_code) const;
 
     void emit_downstream_ip_packet(const void* ip_packet, size_t ip_packet_size) const;
 
     void emit_reset(const ConnectionInfo& connection_info) const;
 
-    bool handle_syn(const ConnectionInfo& connection_info, uint32_t client_sequence);
+    int handle_syn(const ConnectionInfo& connection_info, uint32_t client_sequence);
 
-    bool handle_established_packet(
+    int handle_established_packet(
         Flow* flow,
         uint32_t sequence_number,
         uint32_t acknowledgment_number,
@@ -173,12 +193,12 @@ private:
         const void* payload,
         size_t payload_size);
 
-    bool handle_last_ack_packet(
+    int handle_last_ack_packet(
         Flow* flow,
         uint32_t acknowledgment_number,
         bool ack_flag);
 
-    bool emit_reset_for_unhandled_packet(
+    int emit_reset_for_unhandled_packet(
         const ConnectionInfo& connection_info,
         uint32_t sequence_number,
         uint32_t acknowledgment_number,
@@ -187,9 +207,9 @@ private:
         bool fin_flag,
         size_t payload_size);
 
-    bool fail_flow(
+    int fail_flow(
         const ConnectionInfo& connection_info,
-        const std::string& message,
+        int error_code,
         uint32_t sequence_number,
         uint32_t acknowledgment_number,
         bool ack_flag,
@@ -197,7 +217,7 @@ private:
         bool fin_flag,
         size_t payload_size);
 
-    bool emit_tcp_response(
+    int emit_tcp_response(
         const ConnectionInfo& connection_info,
         uint32_t sequence_number,
         uint32_t acknowledgment_number,

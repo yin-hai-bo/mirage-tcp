@@ -42,38 +42,25 @@ TcpSegment::TcpSegment()
       fin(false),
       rst(false) {}
 
-bool parse_tcp_segment(
+int parse_tcp_segment(
     const std::vector<uint8_t>& bytes,
-    TcpSegment* segment,
-    std::string* error_message) {
+    TcpSegment* segment) {
     if (segment == NULL) {
-        if (error_message != NULL) {
-            *error_message = "segment pointer must not be null";
-        }
-        return false;
+        return kTcpSegmentNullPointer;
     }
 
     if (bytes.size() < 20) {
-        if (error_message != NULL) {
-            *error_message = "tcp segment must be at least 20 bytes";
-        }
-        return false;
+        return kTcpSegmentTooShort;
     }
 
     const uint8_t data_offset_words = static_cast<uint8_t>(bytes[12] >> 4);
     if (data_offset_words < 5) {
-        if (error_message != NULL) {
-            *error_message = "tcp data offset must be at least 5";
-        }
-        return false;
+        return kTcpSegmentInvalidDataOffset;
     }
 
     const size_t header_length = static_cast<size_t>(data_offset_words) * 4U;
     if (header_length > bytes.size()) {
-        if (error_message != NULL) {
-            *error_message = "tcp header length exceeds segment size";
-        }
-        return false;
+        return kTcpSegmentHeaderTooLong;
     }
 
     TcpSegment parsed;
@@ -91,10 +78,7 @@ bool parse_tcp_segment(
 
     parsed.payload.assign(bytes.begin() + static_cast<std::ptrdiff_t>(header_length), bytes.end());
     *segment = parsed;
-    if (error_message != NULL) {
-        error_message->clear();
-    }
-    return true;
+    return kTcpSegmentOk;
 }
 
 std::vector<uint8_t> serialize_tcp_segment(const TcpSegment& segment) {
