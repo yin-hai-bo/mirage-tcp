@@ -42,3 +42,6 @@
 
 # CMake build directories
 build/
+
+# VSCode workspace directory
+.vscode/

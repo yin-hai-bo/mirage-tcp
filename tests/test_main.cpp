@@ -124,57 +124,63 @@ std::vector<std::uint8_t> build_client_packet(
     segment.rst = false;
     segment.payload = payload;
 
-    mirage_tcp::Ipv4Packet packet;
-    std::memcpy(&packet.source_address, &flow.client_ip.ipv4, sizeof(packet.source_address));
-    std::memcpy(&packet.destination_address, &flow.server_ip.ipv4, sizeof(packet.destination_address));
-    packet.protocol = 6;
-    packet.ttl = 64;
-    packet.payload = mirage_tcp::serialize_tcp_segment(segment);
+    const std::vector<std::uint8_t> tcp_bytes = mirage_tcp::serialize_tcp_segment(segment);
+    mirage_tcp::Ip4Head head = {};
+    head.version_ihl = 0x45;
+    head.ttl = 64;
+    head.protocol = 6;
+    std::memcpy(&head.source_address, &flow.client_ip.ipv4, sizeof(head.source_address));
+    std::memcpy(&head.destination_address, &flow.server_ip.ipv4, sizeof(head.destination_address));
     std::vector<std::uint8_t> bytes;
     require(
-        mirage_tcp::serialize_ipv4_packet(packet, &bytes) == mirage_tcp::ErrorCode::Ok,
+        mirage_tcp::serialize_ipv4_packet(head, &tcp_bytes[0], tcp_bytes.size(), &bytes) == mirage_tcp::ErrorCode::Ok,
         "client packet serialization should succeed");
     return bytes;
 }
 
 mirage_tcp::TcpSegment parse_tcp_from_ip(const std::vector<std::uint8_t>& packet_bytes) {
-    mirage_tcp::Ipv4Packet ip_packet;
-    require(
-        mirage_tcp::parse_ipv4_packet(&packet_bytes[0], packet_bytes.size(), &ip_packet) == mirage_tcp::ErrorCode::Ok,
-        "ipv4 parse should succeed");
+    require(packet_bytes.size() >= sizeof(mirage_tcp::Ip4Head), "ipv4 packet should contain fixed header");
+    const mirage_tcp::Ip4Head* head = reinterpret_cast<const mirage_tcp::Ip4Head*>(&packet_bytes[0]);
+    const std::size_t header_length = static_cast<std::size_t>(head->version_ihl & 0x0fU) * 4U;
+    require(header_length >= sizeof(mirage_tcp::Ip4Head), "ipv4 header length should be valid");
+    require(packet_bytes.size() >= header_length, "ipv4 packet should contain full header");
 
     mirage_tcp::TcpSegment segment;
     require(
-        mirage_tcp::parse_tcp_segment(ip_packet.payload, &segment) == mirage_tcp::ErrorCode::Ok,
+        mirage_tcp::parse_tcp_segment(&packet_bytes[header_length], packet_bytes.size() - header_length, &segment) == mirage_tcp::ErrorCode::Ok,
         "tcp parse should succeed");
     return segment;
 }
 
 void test_ipv4_roundtrip() {
-    mirage_tcp::Ipv4Packet packet;
+    mirage_tcp::Ip4Head head = {};
     const mirage_tcp::in_addr source_address = make_ipv4_address(10, 0, 0, 1);
     const mirage_tcp::in_addr destination_address = make_ipv4_address(10, 0, 0, 2);
-    std::memcpy(&packet.source_address, &source_address, sizeof(packet.source_address));
-    std::memcpy(&packet.destination_address, &destination_address, sizeof(packet.destination_address));
-    packet.protocol = 6;
-    packet.ttl = 42;
-    packet.payload.assign(5, 0x11);
+    head.version_ihl = 0x45;
+    head.ttl = 42;
+    head.protocol = 6;
+    std::memcpy(&head.source_address, &source_address, sizeof(head.source_address));
+    std::memcpy(&head.destination_address, &destination_address, sizeof(head.destination_address));
+    std::vector<std::uint8_t> payload(5, 0x11);
 
     std::vector<std::uint8_t> bytes;
     require(
-        mirage_tcp::serialize_ipv4_packet(packet, &bytes) == mirage_tcp::ErrorCode::Ok,
+        mirage_tcp::serialize_ipv4_packet(head, &payload[0], payload.size(), &bytes) == mirage_tcp::ErrorCode::Ok,
         "ipv4 serialize should succeed");
 
-    mirage_tcp::Ipv4Packet parsed;
+    require(bytes.size() >= sizeof(mirage_tcp::Ip4Head), "serialized ipv4 packet should contain fixed header");
+    const mirage_tcp::Ip4Head* parsed = reinterpret_cast<const mirage_tcp::Ip4Head*>(&bytes[0]);
     require(
-        mirage_tcp::parse_ipv4_packet(&bytes[0], bytes.size(), &parsed) == mirage_tcp::ErrorCode::Ok,
-        "ipv4 parse should succeed");
-    require(std::memcmp(&parsed.source_address, &packet.source_address, sizeof(packet.source_address)) == 0, "ipv4 source mismatch");
+        std::memcmp(&parsed->source_address, &head.source_address, sizeof(head.source_address)) == 0,
+        "ipv4 source mismatch");
     require(
-        std::memcmp(&parsed.destination_address, &packet.destination_address, sizeof(packet.destination_address)) == 0,
+        std::memcmp(&parsed->destination_address, &head.destination_address, sizeof(head.destination_address)) == 0,
         "ipv4 destination mismatch");
-    require(parsed.protocol == packet.protocol, "ipv4 protocol mismatch");
-    require(parsed.payload == packet.payload, "ipv4 payload mismatch");
+    require(parsed->protocol == head.protocol, "ipv4 protocol mismatch");
+    require(parsed->ttl == head.ttl, "ipv4 ttl mismatch");
+    const std::size_t header_length = static_cast<std::size_t>(parsed->version_ihl & 0x0fU) * 4U;
+    require(bytes.size() - header_length == payload.size(), "ipv4 payload size mismatch");
+    require(std::memcmp(&bytes[header_length], &payload[0], payload.size()) == 0, "ipv4 payload mismatch");
 }
 
 void test_syn_generates_downstream_syn_ack() {
@@ -319,11 +325,45 @@ void test_invalid_flow_reports_error() {
         false,
         std::vector<std::uint8_t>());
     require(mirage_tcp.handle_incoming_ip_packet(&ack_packet[0], ack_packet.size()) == mirage_tcp::ErrorCode::FlowNotFound, "unknown flow should be handled with reset");
-    require(!context.errors.empty(), "unknown flow should emit error");
-    require(context.errors[0] == mirage_tcp::ErrorCode::FlowNotFound, "unknown flow should emit flow-not-found error code");
+    require(context.errors.empty(), "unknown flow should not emit error callback");
     require(context.downstream_packets.size() == 1, "unknown flow should generate one reset packet");
     mirage_tcp::TcpSegment reset = parse_tcp_from_ip(context.downstream_packets[0]);
     require(reset.rst, "unknown flow response should be RST");
+}
+
+void test_null_packet_returns_invalid_argument_without_error_callback() {
+    CallbackContext context;
+    mirage_tcp::MirageTcp mirage_tcp = make_mirage_tcp(&context);
+
+    require(
+        mirage_tcp.handle_incoming_ip_packet(NULL, 20) == mirage_tcp::ErrorCode::InvalidArgument,
+        "null packet should return invalid argument");
+    require(context.errors.empty(), "null packet should not emit error callback");
+}
+
+void test_short_packet_returns_invalid_argument_without_error_callback() {
+    CallbackContext context;
+    mirage_tcp::MirageTcp mirage_tcp = make_mirage_tcp(&context);
+    const std::uint8_t packet[19] = {};
+
+    require(
+        mirage_tcp.handle_incoming_ip_packet(packet, sizeof(packet)) == mirage_tcp::ErrorCode::InvalidArgument,
+        "short packet should return invalid argument");
+    require(context.errors.empty(), "short packet should not emit error callback");
+}
+
+void test_ipv6_tcp_packet_reports_unsupported() {
+    CallbackContext context;
+    mirage_tcp::MirageTcp mirage_tcp = make_mirage_tcp(&context);
+
+    std::vector<std::uint8_t> ipv6_packet(40, 0);
+    ipv6_packet[0] = 0x60;
+    ipv6_packet[6] = 6;
+
+    require(
+        mirage_tcp.handle_incoming_ip_packet(&ipv6_packet[0], ipv6_packet.size()) == mirage_tcp::ErrorCode::Ipv6TcpUnsupported,
+        "ipv6 tcp packet should report unsupported");
+    require(context.errors.empty(), "ipv6 tcp packet should not emit error callback");
 }
 
 void test_send_downstream_payload_generates_data_segment() {
@@ -435,18 +475,18 @@ void test_incoming_rst_clears_flow() {
         true,
         false,
         std::vector<std::uint8_t>());
-    mirage_tcp::Ipv4Packet rst_ip;
-    require(
-        mirage_tcp::parse_ipv4_packet(&rst_packet[0], rst_packet.size(), &rst_ip) == mirage_tcp::ErrorCode::Ok,
-        "ipv4 parse should succeed");
+    require(rst_packet.size() >= sizeof(mirage_tcp::Ip4Head), "rst packet should contain fixed header");
+    const mirage_tcp::Ip4Head* rst_ip = reinterpret_cast<const mirage_tcp::Ip4Head*>(&rst_packet[0]);
+    const std::size_t rst_header_length = static_cast<std::size_t>(rst_ip->version_ihl & 0x0fU) * 4U;
     mirage_tcp::TcpSegment rst_segment;
     require(
-        mirage_tcp::parse_tcp_segment(rst_ip.payload, &rst_segment) == mirage_tcp::ErrorCode::Ok,
+        mirage_tcp::parse_tcp_segment(&rst_packet[rst_header_length], rst_packet.size() - rst_header_length, &rst_segment) == mirage_tcp::ErrorCode::Ok,
         "tcp parse should succeed");
     rst_segment.rst = true;
-    rst_ip.payload = mirage_tcp::serialize_tcp_segment(rst_segment);
+    const std::vector<std::uint8_t> rst_payload = mirage_tcp::serialize_tcp_segment(rst_segment);
+    mirage_tcp::Ip4Head rst_head = *rst_ip;
     require(
-        mirage_tcp::serialize_ipv4_packet(rst_ip, &rst_packet) == mirage_tcp::ErrorCode::Ok,
+        mirage_tcp::serialize_ipv4_packet(rst_head, &rst_payload[0], rst_payload.size(), &rst_packet) == mirage_tcp::ErrorCode::Ok,
         "RST packet serialization should succeed");
 
     require(mirage_tcp.handle_incoming_ip_packet(&rst_packet[0], rst_packet.size()) == mirage_tcp::ErrorCode::Ok, "incoming RST should be accepted");
@@ -489,6 +529,9 @@ int main() {
     tests.push_back(TestCase{"payload_is_reported_and_acked", test_payload_is_reported_and_acked});
     tests.push_back(TestCase{"fin_generates_fin_ack_and_close_event", test_fin_generates_fin_ack_and_close_event});
     tests.push_back(TestCase{"invalid_flow_reports_error", test_invalid_flow_reports_error});
+    tests.push_back(TestCase{"null_packet_returns_invalid_argument_without_error_callback", test_null_packet_returns_invalid_argument_without_error_callback});
+    tests.push_back(TestCase{"short_packet_returns_invalid_argument_without_error_callback", test_short_packet_returns_invalid_argument_without_error_callback});
+    tests.push_back(TestCase{"ipv6_tcp_packet_reports_unsupported", test_ipv6_tcp_packet_reports_unsupported});
     tests.push_back(TestCase{"send_downstream_payload_generates_data_segment", test_send_downstream_payload_generates_data_segment});
     tests.push_back(TestCase{"close_flow_generates_fin_ack_and_close_event", test_close_flow_generates_fin_ack_and_close_event});
     tests.push_back(TestCase{"incoming_rst_clears_flow", test_incoming_rst_clears_flow});

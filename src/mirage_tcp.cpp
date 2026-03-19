@@ -5,6 +5,7 @@
 
 #include "mirage_tcp/ipv4_packet.h"
 #include "mirage_tcp/tcp_segment.h"
+#include "ipv4_packet_internal.h"
 
 namespace mirage_tcp {
 
@@ -78,6 +79,24 @@ std::vector<uint8_t> serialize_tcp_segment_with_checksum(
     return bytes;
 }
 
+error_code_t parse_ipv6_tcp_packet(const void* packet, size_t packet_size) {
+    if (packet == NULL) {
+        return ErrorCode::InvalidArgument;
+    }
+
+    if (packet_size == 0) {
+        return ErrorCode::InvalidArgument;
+    }
+
+    const uint8_t* bytes = static_cast<const uint8_t*>(packet);
+    const uint8_t version = static_cast<uint8_t>(bytes[0] >> 4);
+    if (version != 6) {
+        return ErrorCode::UnsupportedIpVersion;
+    }
+
+    return ErrorCode::Ipv6TcpUnsupported;
+}
+
 }  // namespace
 
 ConnectionInfo::ConnectionInfo()
@@ -121,28 +140,34 @@ MirageTcp::MirageTcp(const MirageTcpCallbacks& callbacks)
     : callbacks_(callbacks) {}
 
 error_code_t MirageTcp::handle_incoming_ip_packet(const void* ip_packet, size_t ip_packet_size) {
-    Ipv4Packet ipv4_packet;
-    const error_code_t ipv4_parse_result = parse_ipv4_packet(ip_packet, ip_packet_size, &ipv4_packet);
+    const size_t MIN_IP_PACKET_SIZE = sizeof(Ip4Head);
+    if (ip_packet == NULL || ip_packet_size < MIN_IP_PACKET_SIZE) {
+        return ErrorCode::InvalidArgument;
+    }
+
+    Ip4PacketView ipv4_packet;
+    const error_code_t ipv4_parse_result = parse_ipv4_packet(ip_packet, ip_packet_size, ipv4_packet);
     if (ipv4_parse_result != ErrorCode::Ok) {
-        emit_error(ipv4_parse_result);
+        const error_code_t ipv6_parse_result = parse_ipv6_tcp_packet(ip_packet, ip_packet_size);
+        if (ipv6_parse_result == ErrorCode::Ipv6TcpUnsupported) {
+            return ipv6_parse_result;
+        }
         return ipv4_parse_result;
     }
 
-    if (ipv4_packet.protocol != 6) {
-        emit_error(ErrorCode::ProtocolUnsupported);
+    if (ipv4_packet.head->protocol != 6) {
         return ErrorCode::ProtocolUnsupported;
     }
 
     TcpSegment tcp_segment;
-    const error_code_t tcp_parse_result = parse_tcp_segment(ipv4_packet.payload, &tcp_segment);
+    const error_code_t tcp_parse_result = parse_tcp_segment(ipv4_packet.payload, ipv4_packet.payload_size, &tcp_segment);
     if (tcp_parse_result != ErrorCode::Ok) {
-        emit_error(tcp_parse_result);
         return tcp_parse_result;
     }
 
     ConnectionInfo key;
-    std::memcpy(&key.client_ip.ipv4, &ipv4_packet.source_address, sizeof(ipv4_packet.source_address));
-    std::memcpy(&key.server_ip.ipv4, &ipv4_packet.destination_address, sizeof(ipv4_packet.destination_address));
+    std::memcpy(&key.client_ip.ipv4, &ipv4_packet.head->source_address, sizeof(ipv4_packet.head->source_address));
+    std::memcpy(&key.server_ip.ipv4, &ipv4_packet.head->destination_address, sizeof(ipv4_packet.head->destination_address));
     key.client_port = tcp_segment.source_port;
     key.server_port = tcp_segment.destination_port;
     key.ip_ver = 4;
@@ -156,7 +181,6 @@ error_code_t MirageTcp::handle_incoming_ip_packet(const void* ip_packet, size_t 
         if (tcp_segment.rst) {
             return ErrorCode::Ok;
         }
-        emit_error(ErrorCode::FlowNotFound);
         emit_reset_for_unhandled_packet(
             key,
             tcp_segment.sequence_number,
@@ -533,7 +557,6 @@ error_code_t MirageTcp::fail_flow(
     bool syn_flag,
     bool fin_flag,
     size_t payload_size) {
-    emit_error(error_code);
     ipv4_flows_.erase(connection_info);
     emit_reset_for_unhandled_packet(
         connection_info,
@@ -557,12 +580,7 @@ error_code_t MirageTcp::emit_tcp_response(
     bool rst_flag,
     const void* payload,
     size_t payload_size) {
-    Ipv4Packet packet;
-    std::memcpy(&packet.source_address, &connection_info.server_ip.ipv4, sizeof(packet.source_address));
-    std::memcpy(&packet.destination_address, &connection_info.client_ip.ipv4, sizeof(packet.destination_address));
-    packet.protocol = 6;
-    packet.ttl = 64;
-    packet.payload = serialize_tcp_segment_with_checksum(
+    const std::vector<uint8_t> tcp_bytes = serialize_tcp_segment_with_checksum(
         connection_info,
         sequence_number,
         acknowledgment_number,
@@ -574,7 +592,13 @@ error_code_t MirageTcp::emit_tcp_response(
         payload_size);
 
     std::vector<uint8_t> ipv4_bytes;
-    const error_code_t serialize_result = serialize_ipv4_packet(packet, &ipv4_bytes);
+    Ip4Head head = {};
+    head.version_ihl = 0x45;
+    head.ttl = 64;
+    head.protocol = 6;
+    std::memcpy(&head.source_address, &connection_info.server_ip.ipv4, sizeof(head.source_address));
+    std::memcpy(&head.destination_address, &connection_info.client_ip.ipv4, sizeof(head.destination_address));
+    const error_code_t serialize_result = serialize_ipv4_packet(head, &tcp_bytes[0], tcp_bytes.size(), &ipv4_bytes);
     if (serialize_result != ErrorCode::Ok) {
         emit_error(ErrorCode::PacketEmitFailed);
         return ErrorCode::PacketEmitFailed;

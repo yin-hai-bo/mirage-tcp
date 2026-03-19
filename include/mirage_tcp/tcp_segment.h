@@ -1,6 +1,7 @@
 #ifndef MIRAGE_TCP_TCP_SEGMENT_H
 #define MIRAGE_TCP_TCP_SEGMENT_H
 
+#include <cstddef>
 #include <cstdint>
 
 #include <vector>
@@ -9,6 +10,7 @@
 
 namespace mirage_tcp {
 
+using std::size_t;
 using std::uint8_t;
 using std::uint16_t;
 using std::uint32_t;
@@ -50,6 +52,19 @@ struct TcpSegment {
  */
 int parse_tcp_segment(
     const std::vector<uint8_t>& bytes,
+    TcpSegment* segment);
+
+/**
+ * @brief Parses one TCP segment without options from a raw byte span.
+ *
+ * @param bytes Pointer to raw TCP segment bytes.
+ * @param byte_count Size of @p bytes in bytes.
+ * @param segment Output segment structure on success.
+ * @return 0 if parsing succeeds; otherwise an error code.
+ */
+error_code_t parse_tcp_segment(
+    const void* bytes,
+    size_t byte_count,
     TcpSegment* segment);
 
 /**

@@ -1,5 +1,7 @@
 #include "mirage_tcp/ipv4_packet.h"
 
+#include <cstring>
+
 namespace mirage_tcp {
 
 namespace {
@@ -45,29 +47,28 @@ uint16_t internet_checksum(const uint8_t* data, size_t size) {
     return static_cast<uint16_t>(~sum);
 }
 
+uint8_t ip4_version(const Ip4Head& head) {
+    return static_cast<uint8_t>(head.version_ihl >> 4);
+}
+
+uint8_t ip4_header_length_words(const Ip4Head& head) {
+    return static_cast<uint8_t>(head.version_ihl & 0x0fU);
+}
+
 }  // namespace
 
-Ipv4Packet::Ipv4Packet()
-    : source_address(0),
-      destination_address(0),
-      protocol(0),
-      ttl(64) {}
-
-int parse_ipv4_packet(
+error_code_t parse_ipv4_packet(
     const void* packet,
     size_t packet_size,
-    Ipv4Packet* parsed_packet) {
-    if (packet == NULL || parsed_packet == NULL) {
-        return ErrorCode::InvalidArgument;
-    }
-
-    if (packet_size < 20) {
+    Ip4PacketView& parsed_packet) {
+    if (packet_size < sizeof(Ip4Head)) {
         return ErrorCode::PacketTooShort;
     }
 
     const uint8_t* bytes = static_cast<const uint8_t*>(packet);
-    const uint8_t version = static_cast<uint8_t>(bytes[0] >> 4);
-    const uint8_t ihl_words = static_cast<uint8_t>(bytes[0] & 0x0fU);
+    const Ip4Head* head = static_cast<const Ip4Head*>(packet);
+    const uint8_t version = ip4_version(*head);
+    const uint8_t ihl_words = ip4_header_length_words(*head);
     if (version != 4) {
         return ErrorCode::UnsupportedIpVersion;
     }
@@ -77,52 +78,50 @@ int parse_ipv4_packet(
     }
 
     const size_t header_size = static_cast<size_t>(ihl_words) * 4U;
-    const uint16_t total_length = read_u16_be(bytes + 2);
+    const uint16_t total_length = read_u16_be(reinterpret_cast<const uint8_t*>(&head->total_length));
     if (total_length < header_size || total_length > packet_size) {
         return ErrorCode::InvalidIpv4TotalLength;
     }
 
-    const uint16_t flags_and_fragment = read_u16_be(bytes + 6);
+    const uint16_t flags_and_fragment = read_u16_be(reinterpret_cast<const uint8_t*>(&head->flags_fragment_offset));
     if ((flags_and_fragment & 0x1fffU) != 0U) {
         return ErrorCode::Ipv4FragmentUnsupported;
     }
 
-    Ipv4Packet result;
-    result.protocol = bytes[9];
-    result.ttl = bytes[8];
-    result.source_address = read_u32_be(bytes + 12);
-    result.destination_address = read_u32_be(bytes + 16);
-    result.payload.assign(
-        bytes + static_cast<std::ptrdiff_t>(header_size),
-        bytes + static_cast<std::ptrdiff_t>(total_length));
-    *parsed_packet = result;
+    Ip4PacketView result;
+    result.head = head;
+    result.payload = bytes + static_cast<std::ptrdiff_t>(header_size);
+    result.payload_size = total_length - header_size;
+    parsed_packet = result;
     return ErrorCode::Ok;
 }
 
-int serialize_ipv4_packet(
-    const Ipv4Packet& packet,
+error_code_t serialize_ipv4_packet(
+    const Ip4Head& head,
+    const void* payload,
+    size_t payload_size,
     std::vector<uint8_t>* bytes) {
     if (bytes == NULL) {
         return ErrorCode::InvalidArgument;
     }
 
     const size_t header_size = 20;
-    const size_t total_size = header_size + packet.payload.size();
+    const size_t total_size = header_size + payload_size;
     if (total_size > 0xffffU) {
         return ErrorCode::PacketTooLarge;
     }
 
     std::vector<uint8_t> serialized_bytes(total_size, 0);
-    serialized_bytes[0] = 0x45;
+    std::memcpy(&serialized_bytes[0], &head, sizeof(head));
     write_u16_be(static_cast<uint16_t>(total_size), &serialized_bytes[2]);
-    serialized_bytes[8] = packet.ttl;
-    serialized_bytes[9] = packet.protocol;
-    write_u32_be(packet.source_address, &serialized_bytes[12]);
-    write_u32_be(packet.destination_address, &serialized_bytes[16]);
+    write_u16_be(0, &serialized_bytes[10]);
     write_u16_be(internet_checksum(&serialized_bytes[0], header_size), &serialized_bytes[10]);
 
-    for (size_t i = 0; i < packet.payload.size(); ++i) {
-        serialized_bytes[header_size + i] = packet.payload[i];
+    if (payload != NULL && payload_size > 0) {
+        const uint8_t* payload_bytes = static_cast<const uint8_t*>(payload);
+        for (size_t i = 0; i < payload_size; ++i) {
+            serialized_bytes[header_size + i] = payload_bytes[i];
+        }
     }
 
     *bytes = serialized_bytes;

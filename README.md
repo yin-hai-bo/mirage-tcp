@@ -60,6 +60,10 @@ cmake --build build
 ctest --test-dir build --output-on-failure
 ```
 
+## 设计文档
+
+- 依赖关系图见 [`docs/dependency-graph.md`](C:/dev/MirageTCP/docs/dependency-graph.md)
+
 ## 最小用法
 
 ```cpp
