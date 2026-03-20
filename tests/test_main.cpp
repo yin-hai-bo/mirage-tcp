@@ -361,7 +361,7 @@ void test_ipv6_tcp_packet_reports_unsupported() {
     ipv6_packet[6] = 6;
 
     require(
-        mirage_tcp.handle_incoming_ip_packet(&ipv6_packet[0], ipv6_packet.size()) == mirage_tcp::ErrorCode::Ipv6TcpUnsupported,
+        mirage_tcp.handle_incoming_ip_packet(&ipv6_packet[0], ipv6_packet.size()) == mirage_tcp::ErrorCode::Unsupported,
         "ipv6 tcp packet should report unsupported");
     require(context.errors.empty(), "ipv6 tcp packet should not emit error callback");
 }

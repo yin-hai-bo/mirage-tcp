@@ -46,7 +46,7 @@ struct ErrorCode {
         ClosedByReset = 36,
         ClosedByPeerFin = 37,
         TimeWaitExpired = 38,
-        Ipv6TcpUnsupported = 39
+        Unsupported = 39
     };
 };
 

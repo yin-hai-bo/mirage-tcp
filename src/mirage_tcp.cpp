@@ -94,7 +94,7 @@ error_code_t parse_ipv6_tcp_packet(const void* packet, size_t packet_size) {
         return ErrorCode::UnsupportedIpVersion;
     }
 
-    return ErrorCode::Ipv6TcpUnsupported;
+    return ErrorCode::Unsupported;
 }
 
 }  // namespace
@@ -148,7 +148,7 @@ error_code_t MirageTcp::handle_incoming_ip_packet(const void* ip_packet, size_t 
     const error_code_t ipv4_parse_result = parse_ipv4_tcp_packet(ip_packet, ip_packet_size, ipv4_packet);
     if (ipv4_parse_result != ErrorCode::Ok) {
         const error_code_t ipv6_parse_result = parse_ipv6_tcp_packet(ip_packet, ip_packet_size);
-        if (ipv6_parse_result == ErrorCode::Ipv6TcpUnsupported) {
+        if (ipv6_parse_result == ErrorCode::Unsupported) {
             return ipv6_parse_result;
         }
         return ipv4_parse_result;
