@@ -42,6 +42,7 @@ int main() {
     mirage_tcp::MirageTcp mirage_tcp(callbacks);
     std::cout << "MirageTcp host is ready for virtual-NIC packet injection." << std::endl;
     std::cout << "Integrate handle_incoming_ip_packet(...) with your WinTun receive loop." << std::endl;
+    std::cout << "Include mirage_tcp/error_code.h only when you need to inspect specific ErrorCode values." << std::endl;
     std::cout << "Use send_downstream_tcp_payload(...) after handshake completion to fake server data." << std::endl;
     std::cout << "Use close_flow(...) when you want MirageTcp to locally terminate the flow." << std::endl;
     return 0;

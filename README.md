@@ -21,10 +21,12 @@
 
 ## 错误处理约定
 
+- `mirage_tcp/mirage_tcp.h` 只保证导出 `error_code_t`，用于接收或转发返回值。
+- 若调用方需要判断具体错误码，请额外包含 `mirage_tcp/error_code.h`。
 - `ErrorCode::Ok` 表示成功。
 - 失败时，调用方应按统一的 `ErrorCode` 枚举处理，而不是依赖字符串匹配。
 - 所有公共错误码统一定义在 `include/mirage_tcp/error_code.h`。
-- 调用方统一使用 `ErrorCode::...` 形式判断结果，例如 `ErrorCode::FlowNotFound`、`ErrorCode::ProtocolUnsupported`。
+- 调用方统一使用 `ErrorCode::...` 形式判断结果，例如 `ErrorCode::FlowNotFound`、`ErrorCode::Unsupported`。
 
 ## v1 已支持
 
@@ -78,13 +80,25 @@ callbacks.on_error = my_error_code_callback;
 mirage_tcp::MirageTcp mirage_tcp(callbacks);
 mirage_tcp::error_code_t result = mirage_tcp.handle_incoming_ip_packet(ip_packet, ip_packet_size);
 
-if (result != mirage_tcp::ErrorCode::Ok) {
-    // 按 error code 处理错误。
+if (result != 0) {
+    // 可以直接透传或记录 int error code。
 }
 
 mirage_tcp::ConnectionInfo connection_info;
 mirage_tcp.send_downstream_tcp_payload(connection_info, payload, payload_size);
 mirage_tcp.close_flow(connection_info);
+```
+
+## 判断具体错误码
+
+```cpp
+#include <mirage_tcp/error_code.h>
+#include <mirage_tcp/mirage_tcp.h>
+
+mirage_tcp::error_code_t result = mirage_tcp.handle_incoming_ip_packet(ip_packet, ip_packet_size);
+if (result == mirage_tcp::ErrorCode::FlowNotFound) {
+    // 按具体错误码分支处理。
+}
 ```
 
 完整示例见 `examples/basic_client.cpp`。

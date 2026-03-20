@@ -3,8 +3,7 @@
 
 #include <cstddef>
 #include <cstdint>
-
-#include <map>
+#include <memory>
 
 #if defined(_WIN32)
 #include <winsock2.h>
@@ -13,7 +12,7 @@
 #include <netinet/in.h>
 #endif
 
-#include "mirage_tcp/error_code.h"
+#include "mirage_tcp/typedefs.h"
 
 namespace mirage_tcp {
 
@@ -111,6 +110,12 @@ public:
      */
     explicit MirageTcp(const MirageTcpCallbacks& callbacks = MirageTcpCallbacks());
 
+    MirageTcp(MirageTcp &&);
+
+    MirageTcp & operator=(MirageTcp &&);
+
+    ~MirageTcp();
+
     /**
      * @brief Accepts one inbound IPv4 packet from the host.
      *
@@ -142,78 +147,11 @@ public:
     error_code_t close_flow(const ConnectionInfo& connection_info);
 
 private:
-    enum class FlowState {
-        kSynReceived,
-        kEstablished,
-        kLastAck
-    };
 
-    struct Flow {
-        ConnectionInfo connection_info;
-        FlowState state;
-        uint32_t client_next_sequence;
-        uint32_t server_initial_sequence;
-        uint32_t server_next_sequence;
-    };
-
-    void emit_error(error_code_t error_code) const;
-
-    void emit_downstream_ip_packet(const void* ip_packet, size_t ip_packet_size) const;
-
-    void emit_reset(const ConnectionInfo& connection_info) const;
-
-    error_code_t handle_syn(const ConnectionInfo& connection_info, uint32_t client_sequence);
-
-    error_code_t handle_established_packet(
-        Flow* flow,
-        uint32_t sequence_number,
-        uint32_t acknowledgment_number,
-        bool ack_flag,
-        bool fin_flag,
-        bool rst_flag,
-        const void* payload,
-        size_t payload_size);
-
-    error_code_t handle_last_ack_packet(
-        Flow* flow,
-        uint32_t acknowledgment_number,
-        bool ack_flag);
-
-    error_code_t emit_reset_for_unhandled_packet(
-        const ConnectionInfo& connection_info,
-        uint32_t sequence_number,
-        uint32_t acknowledgment_number,
-        bool ack_flag,
-        bool syn_flag,
-        bool fin_flag,
-        size_t payload_size);
-
-    error_code_t fail_flow(
-        const ConnectionInfo& connection_info,
-        error_code_t error_code,
-        uint32_t sequence_number,
-        uint32_t acknowledgment_number,
-        bool ack_flag,
-        bool syn_flag,
-        bool fin_flag,
-        size_t payload_size);
-
-    error_code_t emit_tcp_response(
-        const ConnectionInfo& connection_info,
-        uint32_t sequence_number,
-        uint32_t acknowledgment_number,
-        bool syn_flag,
-        bool ack_flag,
-        bool fin_flag,
-        bool rst_flag,
-        const void* payload,
-        size_t payload_size);
-
-    MirageTcpCallbacks callbacks_;
-    std::map<ConnectionInfo, Flow> ipv4_flows_;
+    class Impl;
+    std::unique_ptr<Impl> impl_;
 };
 
 }  // namespace mirage_tcp
 
 #endif
-
