@@ -50,6 +50,15 @@ struct ConnectionInfo {
  * @brief Strict weak ordering for using ConnectionInfo as a map key.
  */
 bool operator<(const ConnectionInfo& left, const ConnectionInfo& right);
+bool operator==(const ConnectionInfo& left, const ConnectionInfo& right);
+
+struct ConnectionInfoHash {
+    size_t operator()(const ConnectionInfo& connection_info) const;
+};
+
+struct ConnectionInfoEqual {
+    bool operator()(const ConnectionInfo& left, const ConnectionInfo& right) const;
+};
 
 typedef void (*IpPacketGeneratedCallback)(
     void* user_data,

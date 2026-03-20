@@ -5,6 +5,7 @@
 #include <iostream>
 #include <stdexcept>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "mirage_tcp/ipv4_packet.h"
@@ -43,6 +44,12 @@ void on_downstream_ip_packet_generated(void* user_data, const void* ip_packet, s
 mirage_tcp::in_addr make_ipv4_address(std::uint8_t a, std::uint8_t b, std::uint8_t c, std::uint8_t d) {
     mirage_tcp::in_addr address;
     const std::uint8_t bytes[4] = {a, b, c, d};
+    std::memcpy(&address, bytes, sizeof(address));
+    return address;
+}
+
+mirage_tcp::in6_addr make_ipv6_address(const std::uint8_t (&bytes)[16]) {
+    mirage_tcp::in6_addr address;
     std::memcpy(&address, bytes, sizeof(address));
     return address;
 }
@@ -181,6 +188,71 @@ void test_ipv4_roundtrip() {
     const std::size_t header_length = static_cast<std::size_t>(parsed->version_ihl & 0x0fU) * 4U;
     require(bytes.size() - header_length == payload.size(), "ipv4 payload size mismatch");
     require(std::memcmp(&bytes[header_length], &payload[0], payload.size()) == 0, "ipv4 payload mismatch");
+}
+
+void test_connection_info_equal_checks_ports_before_ip_for_ipv4() {
+    mirage_tcp::ConnectionInfo left = make_flow();
+    mirage_tcp::ConnectionInfo right = left;
+
+    right.client_port = static_cast<std::uint16_t>(left.client_port + 1);
+    right.client_ip.ipv4 = make_ipv4_address(10, 0, 0, 99);
+    right.server_ip.ipv4 = make_ipv4_address(93, 184, 216, 99);
+
+    require(!(left == right), "ipv4 equality should fail when client port differs");
+
+    right = left;
+    right.server_port = static_cast<std::uint16_t>(left.server_port + 1);
+    right.client_ip.ipv4 = make_ipv4_address(10, 0, 0, 99);
+    right.server_ip.ipv4 = make_ipv4_address(93, 184, 216, 99);
+
+    require(!(left == right), "ipv4 equality should fail when server port differs");
+}
+
+void test_connection_info_equal_uses_ipv4_s_addr() {
+    mirage_tcp::ConnectionInfo left = make_flow();
+    mirage_tcp::ConnectionInfo right = left;
+
+    require(left == right, "identical ipv4 flows should compare equal");
+
+    right.client_ip.ipv4 = make_ipv4_address(10, 0, 0, 2);
+    require(!(left == right), "ipv4 equality should compare client address by s_addr");
+
+    right = left;
+    right.server_ip.ipv4 = make_ipv4_address(93, 184, 216, 35);
+    require(!(left == right), "ipv4 equality should compare server address by s_addr");
+}
+
+void test_connection_info_equal_uses_memcmp_for_ipv6() {
+    const std::uint8_t client_bytes[16] = {0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1};
+    const std::uint8_t server_bytes[16] = {0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 2};
+    const std::uint8_t different_server_bytes[16] = {0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 3};
+
+    mirage_tcp::ConnectionInfo left;
+    left.ip_ver = 6;
+    left.client_port = 12345;
+    left.server_port = 443;
+    left.client_ip.ipv6 = make_ipv6_address(client_bytes);
+    left.server_ip.ipv6 = make_ipv6_address(server_bytes);
+
+    mirage_tcp::ConnectionInfo right = left;
+    require(left == right, "identical ipv6 flows should compare equal");
+
+    right.server_ip.ipv6 = make_ipv6_address(different_server_bytes);
+    require(!(left == right), "ipv6 equality should compare full address bytes");
+}
+
+void test_connection_info_hash_and_equal_work_with_unordered_map() {
+    mirage_tcp::ConnectionInfo flow = make_flow();
+    std::unordered_map<mirage_tcp::ConnectionInfo, int, mirage_tcp::ConnectionInfoHash, mirage_tcp::ConnectionInfoEqual> values;
+    values.insert(std::make_pair(flow, 7));
+
+    mirage_tcp::ConnectionInfo same_flow = flow;
+    require(values.find(same_flow) != values.end(), "unordered_map should find equivalent connection info");
+    require(values.find(same_flow)->second == 7, "unordered_map should preserve stored value");
+
+    mirage_tcp::ConnectionInfo different_port = flow;
+    different_port.client_port = static_cast<std::uint16_t>(flow.client_port + 1);
+    require(values.find(different_port) == values.end(), "unordered_map should not match different port");
 }
 
 void test_syn_generates_downstream_syn_ack() {
@@ -547,6 +619,10 @@ void test_invalid_ack_resets_existing_flow() {
 int main() {
     std::vector<TestCase> tests;
     tests.push_back(TestCase{"ipv4_roundtrip", test_ipv4_roundtrip});
+    tests.push_back(TestCase{"connection_info_equal_checks_ports_before_ip_for_ipv4", test_connection_info_equal_checks_ports_before_ip_for_ipv4});
+    tests.push_back(TestCase{"connection_info_equal_uses_ipv4_s_addr", test_connection_info_equal_uses_ipv4_s_addr});
+    tests.push_back(TestCase{"connection_info_equal_uses_memcmp_for_ipv6", test_connection_info_equal_uses_memcmp_for_ipv6});
+    tests.push_back(TestCase{"connection_info_hash_and_equal_work_with_unordered_map", test_connection_info_hash_and_equal_work_with_unordered_map});
     tests.push_back(TestCase{"syn_generates_downstream_syn_ack", test_syn_generates_downstream_syn_ack});
     tests.push_back(TestCase{"final_ack_completes_handshake", test_final_ack_completes_handshake});
     tests.push_back(TestCase{"payload_is_reported_and_acked", test_payload_is_reported_and_acked});

@@ -5,10 +5,12 @@
 
 #include <cassert>
 #include <cstring>
-#include <map>
+#include <unordered_map>
 #include <vector>
 
 namespace mirage_tcp {
+
+static_assert(sizeof(in6_addr) == 16, "MirageTCP assumes in6_addr is exactly 16 bytes.");
 
 namespace {
 
@@ -113,19 +115,78 @@ bool operator<(const ConnectionInfo& left, const ConnectionInfo& right) {
         return left.ip_ver < right.ip_ver;
     }
 
-    const size_t address_size = left.ip_ver == 6 ? sizeof(left.client_ip.ipv6) : sizeof(left.client_ip.ipv4);
-    const int client_compare = std::memcmp(&left.client_ip, &right.client_ip, address_size);
-    if (client_compare != 0) {
-        return client_compare < 0;
-    }
-    const int server_compare = std::memcmp(&left.server_ip, &right.server_ip, address_size);
-    if (server_compare != 0) {
-        return server_compare < 0;
-    }
     if (left.client_port != right.client_port) {
         return left.client_port < right.client_port;
     }
-    return left.server_port < right.server_port;
+
+    if (left.server_port != right.server_port) {
+        return left.server_port < right.server_port;
+    }
+
+    if (left.ip_ver == 4) {
+        if (left.client_ip.ipv4.s_addr != right.client_ip.ipv4.s_addr) {
+            return left.client_ip.ipv4.s_addr < right.client_ip.ipv4.s_addr;
+        }
+
+        return left.server_ip.ipv4.s_addr < right.server_ip.ipv4.s_addr;
+    }
+
+    const int client_compare =
+        std::memcmp(&left.client_ip.ipv6, &right.client_ip.ipv6, sizeof(left.client_ip.ipv6));
+    if (client_compare != 0) {
+        return client_compare < 0;
+    }
+
+    return std::memcmp(&left.server_ip.ipv6, &right.server_ip.ipv6, sizeof(left.server_ip.ipv6)) < 0;
+}
+
+bool operator==(const ConnectionInfo& left, const ConnectionInfo& right) {
+    return ConnectionInfoEqual()(left, right);
+}
+
+size_t ConnectionInfoHash::operator()(const ConnectionInfo& connection_info) const {
+    const uint32_t ports =
+        (static_cast<uint32_t>(connection_info.client_port) << 16) |
+        static_cast<uint32_t>(connection_info.server_port);
+    uint32_t hash = ports ^ static_cast<uint32_t>(connection_info.ip_ver);
+
+    if (connection_info.ip_ver == 4) {
+        hash ^= connection_info.client_ip.ipv4.s_addr;
+        hash ^= connection_info.server_ip.ipv4.s_addr;
+    } else {
+        // We normalize into aligned uint32_t words because some supported
+        // platforms expose in6_addr with insufficient alignment for direct
+        // uint32_t pointer access.
+        uint32_t words[8] = {};
+        std::memcpy(&words[0], &connection_info.client_ip.ipv6, sizeof(connection_info.client_ip.ipv6));
+        std::memcpy(&words[4], &connection_info.server_ip.ipv6, sizeof(connection_info.server_ip.ipv6));
+        for (size_t i = 0; i < 8; ++i) {
+            hash ^= words[i];
+        }
+    }
+    return static_cast<size_t>(hash);
+}
+
+bool ConnectionInfoEqual::operator()(const ConnectionInfo& left, const ConnectionInfo& right) const {
+    if (left.ip_ver != right.ip_ver) {
+        return false;
+    }
+
+    if (left.client_port != right.client_port) {
+        return false;
+    }
+
+    if (left.server_port != right.server_port) {
+        return false;
+    }
+
+    if (left.ip_ver == 4) {
+        return left.client_ip.ipv4.s_addr == right.client_ip.ipv4.s_addr &&
+               left.server_ip.ipv4.s_addr == right.server_ip.ipv4.s_addr;
+    }
+
+    return std::memcmp(&left.client_ip.ipv6, &right.client_ip.ipv6, sizeof(left.client_ip.ipv6)) == 0 &&
+           std::memcmp(&left.server_ip.ipv6, &right.server_ip.ipv6, sizeof(left.server_ip.ipv6)) == 0;
 }
 
 MirageTcpCallbacks::MirageTcpCallbacks()
@@ -184,7 +245,7 @@ public:
             return ErrorCode::Ipv4OnlyOperation;
         }
 
-        std::map<ConnectionInfo, Flow>::iterator it = ipv4_flows_.find(connection_info);
+        FlowMap::iterator it = ipv4_flows_.find(connection_info);
         if (it == ipv4_flows_.end()) {
             emit_error(ErrorCode::FlowNotFound);
             return ErrorCode::FlowNotFound;
@@ -219,7 +280,7 @@ public:
             return ErrorCode::Ipv4OnlyOperation;
         }
 
-        std::map<ConnectionInfo, Flow>::iterator it = ipv4_flows_.find(connection_info);
+        FlowMap::iterator it = ipv4_flows_.find(connection_info);
         if (it == ipv4_flows_.end()) {
             emit_error(ErrorCode::FlowNotFound);
             return ErrorCode::FlowNotFound;
@@ -265,6 +326,8 @@ private:
         uint32_t server_next_sequence;
     };
 
+    using FlowMap = std::unordered_map<ConnectionInfo, Flow, ConnectionInfoHash, ConnectionInfoEqual>;
+
     error_code_t handle_incoming_ip4_tcp_packet(const Ip4PacketView & ipv4_packet) {
         TcpSegment tcp_segment;
         const error_code_t tcp_parse_result = parse_tcp_segment(ipv4_packet.payload, ipv4_packet.payload_size, tcp_segment);
@@ -279,7 +342,7 @@ private:
         key.server_port = tcp_segment.destination_port;
         key.ip_ver = 4;
 
-        std::map<ConnectionInfo, Flow>::iterator it = ipv4_flows_.find(key);
+        FlowMap::iterator it = ipv4_flows_.find(key);
         if (tcp_segment.syn && !tcp_segment.ack) {
             return handle_syn(key, tcp_segment.sequence_number);
         }
@@ -364,7 +427,7 @@ private:
         flow.server_initial_sequence = 7000 + static_cast<uint32_t>(ipv4_flows_.size()) * 1024U;
         flow.server_next_sequence = flow.server_initial_sequence + 1;
 
-        std::pair<std::map<ConnectionInfo, Flow>::iterator, bool> inserted =
+        std::pair<FlowMap::iterator, bool> inserted =
             ipv4_flows_.insert(std::make_pair(connection_info, flow));
         if (!inserted.second) {
             emit_error(ErrorCode::FlowAlreadyExists);
@@ -584,7 +647,7 @@ private:
 
 private:
     MirageTcpCallbacks callbacks_;
-    std::map<ConnectionInfo, Flow> ipv4_flows_;
+    FlowMap ipv4_flows_;
 };
 
 MirageTcp::MirageTcp(const MirageTcpCallbacks& callbacks)
