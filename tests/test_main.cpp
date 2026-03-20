@@ -147,7 +147,7 @@ mirage_tcp::TcpSegment parse_tcp_from_ip(const std::vector<std::uint8_t>& packet
 
     mirage_tcp::TcpSegment segment;
     require(
-        mirage_tcp::parse_tcp_segment(&packet_bytes[header_length], packet_bytes.size() - header_length, &segment) == mirage_tcp::ErrorCode::Ok,
+        mirage_tcp::parse_tcp_segment(&packet_bytes[header_length], packet_bytes.size() - header_length, segment) == mirage_tcp::ErrorCode::Ok,
         "tcp parse should succeed");
     return segment;
 }
@@ -503,7 +503,7 @@ void test_incoming_rst_clears_flow() {
     const std::size_t rst_header_length = static_cast<std::size_t>(rst_ip->version_ihl & 0x0fU) * 4U;
     mirage_tcp::TcpSegment rst_segment;
     require(
-        mirage_tcp::parse_tcp_segment(&rst_packet[rst_header_length], rst_packet.size() - rst_header_length, &rst_segment) == mirage_tcp::ErrorCode::Ok,
+        mirage_tcp::parse_tcp_segment(&rst_packet[rst_header_length], rst_packet.size() - rst_header_length, rst_segment) == mirage_tcp::ErrorCode::Ok,
         "tcp parse should succeed");
     rst_segment.rst = true;
     const std::vector<std::uint8_t> rst_payload = mirage_tcp::serialize_tcp_segment(rst_segment);

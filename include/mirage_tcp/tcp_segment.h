@@ -45,20 +45,12 @@ struct TcpSegment {
 };
 
 /**
- * @brief Parses one TCP segment without options.
- *
- * @param bytes Raw TCP segment bytes.
- * @param segment Output segment structure on success.
- * @return 0 if parsing succeeds; otherwise an error code.
- */
-int parse_tcp_segment(
-    const std::vector<uint8_t>& bytes,
-    TcpSegment* segment);
-
-/**
  * @brief Parses one TCP segment without options from a raw byte span.
  *
- * @param bytes Pointer to raw TCP segment bytes.
+ * @param bytes Pointer to raw TCP segment bytes starting at the TCP header.
+ *        This must point to the first byte immediately after the IP header,
+ *        not to the beginning of the full IP packet. The caller guarantees
+ *        that @p bytes is not null.
  * @param byte_count Size of @p bytes in bytes.
  * @param segment Output segment structure on success.
  * @return 0 if parsing succeeds; otherwise an error code.
@@ -66,7 +58,7 @@ int parse_tcp_segment(
 error_code_t parse_tcp_segment(
     const void* bytes,
     size_t byte_count,
-    TcpSegment* segment);
+    TcpSegment& segment);
 
 /**
  * @brief Serializes one TCP segment without checksum calculation.

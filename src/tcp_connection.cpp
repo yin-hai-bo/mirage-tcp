@@ -120,7 +120,8 @@ error_code_t TcpConnection::push_incoming_segment(const TcpSegment& segment) {
 
 error_code_t TcpConnection::push_incoming_bytes(const std::vector<uint8_t>& bytes) {
     TcpSegment segment;
-    const error_code_t parse_result = parse_tcp_segment(bytes, &segment);
+    const void* raw_bytes = bytes.empty() ? NULL : &bytes[0];
+    const error_code_t parse_result = parse_tcp_segment(raw_bytes, bytes.size(), segment);
     if (parse_result != ErrorCode::Ok) {
         return parse_result;
     }

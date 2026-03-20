@@ -106,7 +106,7 @@ error_code_t serialize_ipv4_packet(
         return ErrorCode::InvalidArgument;
     }
 
-    const size_t header_size = 20;
+    const size_t header_size = sizeof(Ip4Head);
     const size_t total_size = header_size + payload_size;
     if (total_size > 0xffffU) {
         return ErrorCode::PacketTooLarge;

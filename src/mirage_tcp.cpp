@@ -257,7 +257,7 @@ private:
 
     error_code_t handle_incoming_ip4_tcp_packet(const Ip4PacketView & ipv4_packet) {
         TcpSegment tcp_segment;
-        const error_code_t tcp_parse_result = parse_tcp_segment(ipv4_packet.payload, ipv4_packet.payload_size, &tcp_segment);
+        const error_code_t tcp_parse_result = parse_tcp_segment(ipv4_packet.payload, ipv4_packet.payload_size, tcp_segment);
         if (tcp_parse_result != ErrorCode::Ok) {
             return tcp_parse_result;
         }
