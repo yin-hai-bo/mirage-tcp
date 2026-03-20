@@ -17,6 +17,10 @@ target_include_directories(mirage_tcp
         ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
+if(WIN32)
+    target_link_libraries(mirage_tcp PUBLIC ws2_32)
+endif()
+
 add_executable(mirage_tcp_example
     examples/basic_client.cpp
 )

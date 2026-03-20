@@ -140,8 +140,7 @@ MirageTcp::MirageTcp(const MirageTcpCallbacks& callbacks)
     : callbacks_(callbacks) {}
 
 error_code_t MirageTcp::handle_incoming_ip_packet(const void* ip_packet, size_t ip_packet_size) {
-    const size_t MIN_IP_PACKET_SIZE = sizeof(Ip4Head);
-    if (ip_packet == NULL || ip_packet_size < MIN_IP_PACKET_SIZE) {
+    if (ip_packet == nullptr) {
         return ErrorCode::InvalidArgument;
     }
 
@@ -608,4 +607,3 @@ error_code_t MirageTcp::emit_tcp_response(
 }
 
 }  // namespace mirage_tcp
-

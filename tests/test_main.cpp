@@ -341,14 +341,14 @@ void test_null_packet_returns_invalid_argument_without_error_callback() {
     require(context.errors.empty(), "null packet should not emit error callback");
 }
 
-void test_short_packet_returns_invalid_argument_without_error_callback() {
+void test_short_packet_returns_packet_too_short_without_error_callback() {
     CallbackContext context;
     mirage_tcp::MirageTcp mirage_tcp = make_mirage_tcp(&context);
     const std::uint8_t packet[19] = {};
 
     require(
-        mirage_tcp.handle_incoming_ip_packet(packet, sizeof(packet)) == mirage_tcp::ErrorCode::InvalidArgument,
-        "short packet should return invalid argument");
+        mirage_tcp.handle_incoming_ip_packet(packet, sizeof(packet)) == mirage_tcp::ErrorCode::PacketTooShort,
+        "short packet should return packet too short");
     require(context.errors.empty(), "short packet should not emit error callback");
 }
 
@@ -530,7 +530,7 @@ int main() {
     tests.push_back(TestCase{"fin_generates_fin_ack_and_close_event", test_fin_generates_fin_ack_and_close_event});
     tests.push_back(TestCase{"invalid_flow_reports_error", test_invalid_flow_reports_error});
     tests.push_back(TestCase{"null_packet_returns_invalid_argument_without_error_callback", test_null_packet_returns_invalid_argument_without_error_callback});
-    tests.push_back(TestCase{"short_packet_returns_invalid_argument_without_error_callback", test_short_packet_returns_invalid_argument_without_error_callback});
+    tests.push_back(TestCase{"short_packet_returns_packet_too_short_without_error_callback", test_short_packet_returns_packet_too_short_without_error_callback});
     tests.push_back(TestCase{"ipv6_tcp_packet_reports_unsupported", test_ipv6_tcp_packet_reports_unsupported});
     tests.push_back(TestCase{"send_downstream_payload_generates_data_segment", test_send_downstream_payload_generates_data_segment});
     tests.push_back(TestCase{"close_flow_generates_fin_ack_and_close_event", test_close_flow_generates_fin_ack_and_close_event});

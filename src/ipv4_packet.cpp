@@ -2,6 +2,12 @@
 
 #include <cstring>
 
+#if defined(_WIN32)
+#include <winsock2.h>
+#else
+#include <netinet/in.h>
+#endif
+
 namespace mirage_tcp {
 
 namespace {
@@ -10,13 +16,6 @@ uint16_t read_u16_be(const uint8_t* bytes) {
     return static_cast<uint16_t>(
         (static_cast<uint16_t>(bytes[0]) << 8) |
         static_cast<uint16_t>(bytes[1]));
-}
-
-uint32_t read_u32_be(const uint8_t* bytes) {
-    return (static_cast<uint32_t>(bytes[0]) << 24) |
-           (static_cast<uint32_t>(bytes[1]) << 16) |
-           (static_cast<uint32_t>(bytes[2]) << 8) |
-           static_cast<uint32_t>(bytes[3]);
 }
 
 void write_u16_be(uint16_t value, uint8_t* bytes) {
@@ -60,39 +59,36 @@ uint8_t ip4_header_length_words(const Ip4Head& head) {
 error_code_t parse_ipv4_packet(
     const void* packet,
     size_t packet_size,
-    Ip4PacketView& parsed_packet) {
+    Ip4PacketView& result)
+{
     if (packet_size < sizeof(Ip4Head)) {
         return ErrorCode::PacketTooShort;
     }
 
-    const uint8_t* bytes = static_cast<const uint8_t*>(packet);
-    const Ip4Head* head = static_cast<const Ip4Head*>(packet);
-    const uint8_t version = ip4_version(*head);
-    const uint8_t ihl_words = ip4_header_length_words(*head);
-    if (version != 4) {
+    const Ip4Head & head = *static_cast<const Ip4Head*>(packet);
+    if (ip4_version(head) != 4) {
         return ErrorCode::UnsupportedIpVersion;
     }
 
-    if (ihl_words < 5) {
+    const uint8_t ihl_words = ip4_header_length_words(head);
+    const size_t header_size = static_cast<size_t>(ihl_words) * 4U;
+    if (header_size < sizeof(Ip4Head)) {
         return ErrorCode::InvalidIpv4HeaderLength;
     }
 
-    const size_t header_size = static_cast<size_t>(ihl_words) * 4U;
-    const uint16_t total_length = read_u16_be(reinterpret_cast<const uint8_t*>(&head->total_length));
+    const uint16_t total_length = ntohs(head.total_length);
     if (total_length < header_size || total_length > packet_size) {
         return ErrorCode::InvalidIpv4TotalLength;
     }
 
-    const uint16_t flags_and_fragment = read_u16_be(reinterpret_cast<const uint8_t*>(&head->flags_fragment_offset));
+    const uint16_t flags_and_fragment = ntohs(head.flags_fragment_offset);
     if ((flags_and_fragment & 0x1fffU) != 0U) {
         return ErrorCode::Ipv4FragmentUnsupported;
     }
 
-    Ip4PacketView result;
-    result.head = head;
-    result.payload = bytes + static_cast<std::ptrdiff_t>(header_size);
+    result.head = &head;
+    result.payload = static_cast<const uint8_t*>(packet) + header_size;
     result.payload_size = total_length - header_size;
-    parsed_packet = result;
     return ErrorCode::Ok;
 }
 
@@ -129,4 +125,3 @@ error_code_t serialize_ipv4_packet(
 }
 
 }  // namespace mirage_tcp
-
