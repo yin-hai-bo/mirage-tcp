@@ -142,6 +142,14 @@ public:
         : callbacks_(callbacks)
     {}
 
+    /**
+     * @brief Accepts one inbound IP packet from the host.
+     *
+     * @param ip_packet Pointer to raw IP packet bytes. The caller guarantees
+     *        that @p ip_packet is not null and is aligned to alignof(Ip6Head).
+     * @param ip_packet_size Size of @p ip_packet in bytes.
+     * @return 0 if the packet is accepted; otherwise an error code.
+     */
     error_code_t handle_incoming_ip_packet(const void* ip_packet, size_t ip_packet_size) {
         if (ip_packet == nullptr) {
             return ErrorCode::InvalidArgument;

@@ -12,6 +12,7 @@
 #include <netinet/in.h>
 #endif
 
+#include "mirage_tcp/ip6_head.h"
 #include "mirage_tcp/typedefs.h"
 
 namespace mirage_tcp {
@@ -117,9 +118,10 @@ public:
     ~MirageTcp();
 
     /**
-     * @brief Accepts one inbound IPv4 packet from the host.
+     * @brief Accepts one inbound IP packet from the host.
      *
-     * @param ip_packet Pointer to raw IPv4 packet bytes.
+     * @param ip_packet Pointer to raw IP packet bytes. The caller guarantees
+     *        that @p ip_packet is not null and is aligned to alignof(Ip6Head).
      * @param ip_packet_size Size of @p ip_packet in bytes.
      * @return 0 if the packet is accepted; otherwise an error code.
      */

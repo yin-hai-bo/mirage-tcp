@@ -1,47 +1,37 @@
 #include "mirage_tcp/tcp_segment.h"
 #include "mirage_tcp/tcp_head.h"
 
+#include <cassert>
 #include <cstring>
+
+#if defined(_WIN32)
+#include <winsock2.h>
+#else
+#include <netinet/in.h>
+#endif
 
 namespace mirage_tcp {
 
 namespace {
 
-uint16_t read_u16_be(const uint8_t* bytes, size_t offset) {
-    return static_cast<uint16_t>(
-        (static_cast<uint16_t>(bytes[offset]) << 8) |
-        static_cast<uint16_t>(bytes[offset + 1]));
-}
-
-uint32_t read_u32_be(const uint8_t* bytes, size_t offset) {
-    return (static_cast<uint32_t>(bytes[offset]) << 24) |
-           (static_cast<uint32_t>(bytes[offset + 1]) << 16) |
-           (static_cast<uint32_t>(bytes[offset + 2]) << 8) |
-           static_cast<uint32_t>(bytes[offset + 3]);
-}
-
 void write_u16_be(uint16_t value, std::vector<uint8_t>* bytes, size_t offset) {
-    (*bytes)[offset] = static_cast<uint8_t>((value >> 8) & 0xff);
-    (*bytes)[offset + 1] = static_cast<uint8_t>(value & 0xff);
+    const uint16_t network_value = htons(value);
+    std::memcpy(bytes->data() + offset, &network_value, sizeof(network_value));
 }
 
 void write_u16_be(uint16_t value, uint8_t* bytes, size_t offset) {
-    bytes[offset] = static_cast<uint8_t>((value >> 8) & 0xff);
-    bytes[offset + 1] = static_cast<uint8_t>(value & 0xff);
+    const uint16_t network_value = htons(value);
+    std::memcpy(bytes + offset, &network_value, sizeof(network_value));
 }
 
 void write_u32_be(uint32_t value, std::vector<uint8_t>* bytes, size_t offset) {
-    (*bytes)[offset] = static_cast<uint8_t>((value >> 24) & 0xff);
-    (*bytes)[offset + 1] = static_cast<uint8_t>((value >> 16) & 0xff);
-    (*bytes)[offset + 2] = static_cast<uint8_t>((value >> 8) & 0xff);
-    (*bytes)[offset + 3] = static_cast<uint8_t>(value & 0xff);
+    const uint32_t network_value = htonl(value);
+    std::memcpy(bytes->data() + offset, &network_value, sizeof(network_value));
 }
 
 void write_u32_be(uint32_t value, uint8_t* bytes, size_t offset) {
-    bytes[offset] = static_cast<uint8_t>((value >> 24) & 0xff);
-    bytes[offset + 1] = static_cast<uint8_t>((value >> 16) & 0xff);
-    bytes[offset + 2] = static_cast<uint8_t>((value >> 8) & 0xff);
-    bytes[offset + 3] = static_cast<uint8_t>(value & 0xff);
+    const uint32_t network_value = htonl(value);
+    std::memcpy(bytes + offset, &network_value, sizeof(network_value));
 }
 
 }  // namespace
@@ -60,17 +50,18 @@ TcpSegment::TcpSegment()
 error_code_t parse_tcp_segment(
     const void* bytes,
     size_t byte_count,
-    TcpSegment& segment) {
+    TcpSegment& out_segment) {
     const size_t TCP_HEADER_LENGTH_BYTES = sizeof(TcpHead);
     if (byte_count < TCP_HEADER_LENGTH_BYTES) {
         return ErrorCode::PacketTooShort;
     }
 
     const uint8_t* raw_bytes = static_cast<const uint8_t*>(bytes);
-    TcpHead tcp_head;
-    std::memcpy(&tcp_head, raw_bytes, sizeof(tcp_head));
+    assert(reinterpret_cast<std::uintptr_t>(raw_bytes) % alignof(TcpHead) == 0U);
 
-    const uint8_t data_offset_words = static_cast<uint8_t>(tcp_head.data_offset_reserved >> 4);
+    const TcpHead* tcp_head = reinterpret_cast<const TcpHead*>(raw_bytes);
+    const uint8_t data_offset_words =
+        static_cast<uint8_t>(tcp_head->data_offset_reserved >> 4);
     if (data_offset_words < 5) {
         return ErrorCode::InvalidTcpDataOffset;
     }
@@ -80,24 +71,21 @@ error_code_t parse_tcp_segment(
         return ErrorCode::TcpHeaderTooLong;
     }
 
-    TcpSegment parsed;
-    const uint8_t* tcp_head_bytes = reinterpret_cast<const uint8_t*>(&tcp_head);
-    parsed.source_port = read_u16_be(tcp_head_bytes, offsetof(TcpHead, source_port));
-    parsed.destination_port = read_u16_be(tcp_head_bytes, offsetof(TcpHead, destination_port));
-    parsed.sequence_number = read_u32_be(tcp_head_bytes, offsetof(TcpHead, sequence_number));
-    parsed.acknowledgment_number = read_u32_be(tcp_head_bytes, offsetof(TcpHead, acknowledgment_number));
-    parsed.window_size = read_u16_be(tcp_head_bytes, offsetof(TcpHead, window_size));
+    out_segment.source_port = ntohs(tcp_head->source_port);
+    out_segment.destination_port = ntohs(tcp_head->destination_port);
+    out_segment.sequence_number = ntohl(tcp_head->sequence_number);
+    out_segment.acknowledgment_number = ntohl(tcp_head->acknowledgment_number);
+    out_segment.window_size = ntohs(tcp_head->window_size);
 
-    const uint8_t flags = tcp_head.flags;
-    parsed.fin = (flags & 0x01U) != 0;
-    parsed.syn = (flags & 0x02U) != 0;
-    parsed.rst = (flags & 0x04U) != 0;
-    parsed.ack = (flags & 0x10U) != 0;
+    const uint8_t flags = tcp_head->flags;
+    out_segment.fin = (flags & 0x01U) != 0;
+    out_segment.syn = (flags & 0x02U) != 0;
+    out_segment.rst = (flags & 0x04U) != 0;
+    out_segment.ack = (flags & 0x10U) != 0;
 
-    parsed.payload.assign(
+    out_segment.payload.assign(
         raw_bytes + static_cast<std::ptrdiff_t>(header_length),
         raw_bytes + static_cast<std::ptrdiff_t>(byte_count));
-    segment = parsed;
     return ErrorCode::Ok;
 }
 

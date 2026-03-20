@@ -50,15 +50,15 @@ struct TcpSegment {
  * @param bytes Pointer to raw TCP segment bytes starting at the TCP header.
  *        This must point to the first byte immediately after the IP header,
  *        not to the beginning of the full IP packet. The caller guarantees
- *        that @p bytes is not null.
+ *        that @p bytes is not null and is aligned to alignof(TcpHead).
  * @param byte_count Size of @p bytes in bytes.
- * @param segment Output segment structure on success.
+ * @param out_segment Output segment structure on success.
  * @return 0 if parsing succeeds; otherwise an error code.
  */
 error_code_t parse_tcp_segment(
     const void* bytes,
     size_t byte_count,
-    TcpSegment& segment);
+    TcpSegment& out_segment);
 
 /**
  * @brief Serializes one TCP segment without checksum calculation.
