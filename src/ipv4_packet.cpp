@@ -1,5 +1,6 @@
 #include "mirage_tcp/ipv4_packet.h"
 
+#include <cassert>
 #include <cstring>
 
 #if defined(_WIN32)
@@ -65,13 +66,14 @@ error_code_t parse_ipv4_tcp_packet(
         return ErrorCode::PacketTooShort;
     }
 
+    assert(reinterpret_cast<std::uintptr_t>(packet) % alignof(Ip4Head) == 0U);
     const Ip4Head & head = *static_cast<const Ip4Head*>(packet);
     if (ip4_version(head) != 4) {
         return ErrorCode::UnsupportedIpVersion;
     }
 
-    const uint8_t kTcpProtocolNumber = 6;
-    if (head.protocol != kTcpProtocolNumber) {
+    const uint8_t TCP_PROTOCOL_NUM = 6;
+    if (head.protocol != TCP_PROTOCOL_NUM) {
         return ErrorCode::IsNotTcp;
     }
 
