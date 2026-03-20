@@ -145,17 +145,13 @@ error_code_t MirageTcp::handle_incoming_ip_packet(const void* ip_packet, size_t 
     }
 
     Ip4PacketView ipv4_packet;
-    const error_code_t ipv4_parse_result = parse_ipv4_packet(ip_packet, ip_packet_size, ipv4_packet);
+    const error_code_t ipv4_parse_result = parse_ipv4_tcp_packet(ip_packet, ip_packet_size, ipv4_packet);
     if (ipv4_parse_result != ErrorCode::Ok) {
         const error_code_t ipv6_parse_result = parse_ipv6_tcp_packet(ip_packet, ip_packet_size);
         if (ipv6_parse_result == ErrorCode::Ipv6TcpUnsupported) {
             return ipv6_parse_result;
         }
         return ipv4_parse_result;
-    }
-
-    if (ipv4_packet.head->protocol != 6) {
-        return ErrorCode::ProtocolUnsupported;
     }
 
     TcpSegment tcp_segment;

@@ -366,6 +366,29 @@ void test_ipv6_tcp_packet_reports_unsupported() {
     require(context.errors.empty(), "ipv6 tcp packet should not emit error callback");
 }
 
+void test_ipv4_non_tcp_packet_reports_is_not_tcp() {
+    CallbackContext context;
+    mirage_tcp::MirageTcp mirage_tcp = make_mirage_tcp(&context);
+    mirage_tcp::ConnectionInfo flow = make_flow();
+
+    std::vector<std::uint8_t> payload(4, 0);
+    mirage_tcp::Ip4Head head = {};
+    head.version_ihl = 0x45;
+    head.ttl = 64;
+    head.protocol = 17;
+    std::memcpy(&head.source_address, &flow.client_ip.ipv4, sizeof(head.source_address));
+    std::memcpy(&head.destination_address, &flow.server_ip.ipv4, sizeof(head.destination_address));
+
+    std::vector<std::uint8_t> packet;
+    require(
+        mirage_tcp::serialize_ipv4_packet(head, &payload[0], payload.size(), &packet) == mirage_tcp::ErrorCode::Ok,
+        "ipv4 non-tcp packet serialization should succeed");
+    require(
+        mirage_tcp.handle_incoming_ip_packet(&packet[0], packet.size()) == mirage_tcp::ErrorCode::IsNotTcp,
+        "ipv4 non-tcp packet should report is not tcp");
+    require(context.errors.empty(), "ipv4 non-tcp packet should not emit error callback");
+}
+
 void test_send_downstream_payload_generates_data_segment() {
     CallbackContext context;
     mirage_tcp::MirageTcp mirage_tcp = make_mirage_tcp(&context);
@@ -532,6 +555,7 @@ int main() {
     tests.push_back(TestCase{"null_packet_returns_invalid_argument_without_error_callback", test_null_packet_returns_invalid_argument_without_error_callback});
     tests.push_back(TestCase{"short_packet_returns_packet_too_short_without_error_callback", test_short_packet_returns_packet_too_short_without_error_callback});
     tests.push_back(TestCase{"ipv6_tcp_packet_reports_unsupported", test_ipv6_tcp_packet_reports_unsupported});
+    tests.push_back(TestCase{"ipv4_non_tcp_packet_reports_is_not_tcp", test_ipv4_non_tcp_packet_reports_is_not_tcp});
     tests.push_back(TestCase{"send_downstream_payload_generates_data_segment", test_send_downstream_payload_generates_data_segment});
     tests.push_back(TestCase{"close_flow_generates_fin_ack_and_close_event", test_close_flow_generates_fin_ack_and_close_event});
     tests.push_back(TestCase{"incoming_rst_clears_flow", test_incoming_rst_clears_flow});

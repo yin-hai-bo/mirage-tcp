@@ -6,15 +6,15 @@
 namespace mirage_tcp {
 
 /**
- * @brief Parses one inbound IPv4 packet into a non-owning view.
+ * @brief Parses one inbound IPv4/TCP packet into a non-owning view.
  *
- * @param packet Pointer to the raw IP packet bytes to validate as IPv4.
+ * @param packet Pointer to the raw IP packet bytes to validate as IPv4/TCP.
  *               The caller must guarantee that @p packet is not NULL.
  * @param packet_size Size of @p packet in bytes.
  * @param parsed_packet Output packet view on success.
- * @return 0 if parsing succeeds as IPv4; otherwise an error code.
+ * @return 0 if parsing succeeds as IPv4/TCP; otherwise an error code.
  */
-error_code_t parse_ipv4_packet(
+error_code_t parse_ipv4_tcp_packet(
     const void* packet,
     size_t packet_size,
     Ip4PacketView& parsed_packet);

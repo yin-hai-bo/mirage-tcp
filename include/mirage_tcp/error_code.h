@@ -15,7 +15,7 @@ struct ErrorCode {
         InvalidIpv4TotalLength = 5,
         Ipv4FragmentUnsupported = 6,
         PacketTooLarge = 7,
-        ProtocolUnsupported = 8,
+        IsNotTcp = 8,
         InvalidTcpDataOffset = 9,
         TcpHeaderTooLong = 10,
         HandshakeFinalAckExpected = 11,

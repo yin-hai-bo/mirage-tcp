@@ -56,7 +56,7 @@ uint8_t ip4_header_length_words(const Ip4Head& head) {
 
 }  // namespace
 
-error_code_t parse_ipv4_packet(
+error_code_t parse_ipv4_tcp_packet(
     const void* packet,
     size_t packet_size,
     Ip4PacketView& result)
@@ -68,6 +68,11 @@ error_code_t parse_ipv4_packet(
     const Ip4Head & head = *static_cast<const Ip4Head*>(packet);
     if (ip4_version(head) != 4) {
         return ErrorCode::UnsupportedIpVersion;
+    }
+
+    const uint8_t kTcpProtocolNumber = 6;
+    if (head.protocol != kTcpProtocolNumber) {
+        return ErrorCode::IsNotTcp;
     }
 
     const uint8_t ihl_words = ip4_header_length_words(head);
