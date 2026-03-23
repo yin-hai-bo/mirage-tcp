@@ -1,9 +1,7 @@
 #include <cstddef>
 #include <cstring>
 #include <cstdint>
-#include <functional>
 #include <iostream>
-#include <stdexcept>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -11,15 +9,13 @@
 #include "mirage_tcp/ipv4_packet.h"
 #include "mirage_tcp/mirage_tcp.h"
 #include "mirage_tcp/tcp_segment.h"
+#include "test_harness.h"
+
+void append_checksum_tests(std::vector<TestCase>* tests);
 
 namespace {
 
 using mirage_tcp::TcpSegment;
-
-struct TestCase {
-    const char* name;
-    std::function<void()> run;
-};
 
 struct CallbackContext {
     std::vector<std::vector<std::uint8_t> > downstream_packets;
@@ -29,12 +25,6 @@ struct CallbackContext {
     std::vector<mirage_tcp::ConnectionInfo> reset_flows;
     std::vector<mirage_tcp::error_code_t> errors;
 };
-
-void require(bool condition, const std::string& message) {
-    if (!condition) {
-        throw std::runtime_error(message);
-    }
-}
 
 void on_downstream_ip_packet_generated(void* user_data, const void* ip_packet, std::size_t ip_packet_size) {
     CallbackContext* context = static_cast<CallbackContext*>(user_data);
@@ -645,6 +635,7 @@ int main() {
     tests.push_back(TestCase{"close_flow_generates_fin_ack_and_close_event", test_close_flow_generates_fin_ack_and_close_event});
     tests.push_back(TestCase{"incoming_rst_clears_flow", test_incoming_rst_clears_flow});
     tests.push_back(TestCase{"invalid_ack_resets_existing_flow", test_invalid_ack_resets_existing_flow});
+    append_checksum_tests(&tests);
 
     for (std::size_t i = 0; i < tests.size(); ++i) {
         try {

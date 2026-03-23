@@ -1,3 +1,4 @@
+#include "mirage_tcp/checksum.h"
 #include "mirage_tcp/mirage_tcp.h"
 #include "mirage_tcp/ipv4_packet.h"
 #include "mirage_tcp/tcp_segment.h"
@@ -10,35 +11,11 @@
 
 namespace mirage_tcp {
 
-static_assert(sizeof(in6_addr) == 16, "MirageTCP assumes in6_addr is exactly 16 bytes.");
-
 namespace {
-
-uint16_t read_u16_be(const uint8_t* bytes) {
-    return static_cast<uint16_t>(
-        (static_cast<uint16_t>(bytes[0]) << 8) |
-        static_cast<uint16_t>(bytes[1]));
-}
 
 void write_u16_be(uint16_t value, uint8_t* bytes) {
     bytes[0] = static_cast<uint8_t>((value >> 8) & 0xff);
     bytes[1] = static_cast<uint8_t>(value & 0xff);
-}
-
-uint16_t internet_checksum(const uint8_t* data, size_t size) {
-    uint32_t sum = 0;
-    size_t index = 0;
-    while (index + 1 < size) {
-        sum += read_u16_be(data + index);
-        index += 2;
-    }
-    if (index < size) {
-        sum += static_cast<uint16_t>(static_cast<uint16_t>(data[index]) << 8);
-    }
-    while ((sum >> 16) != 0) {
-        sum = (sum & 0xffffU) + (sum >> 16);
-    }
-    return static_cast<uint16_t>(~sum);
 }
 
 std::vector<uint8_t> serialize_tcp_segment_with_checksum(
@@ -71,7 +48,7 @@ std::vector<uint8_t> serialize_tcp_segment_with_checksum(
     }
 
     write_u16_be(0, &bytes[16]);
-    const uint16_t checksum = internet_checksum(&pseudo_header[0], pseudo_header.size());
+    const uint16_t checksum = ~Checksum::Calculate(&pseudo_header[0], pseudo_header.size());
     write_u16_be(checksum, &bytes[16]);
     return bytes;
 }

@@ -7,6 +7,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 add_library(mirage_tcp STATIC
+    src/checksum.cpp
     src/ipv4_packet.cpp
     src/mirage_tcp.cpp
     src/tcp_segment.cpp
@@ -27,6 +28,7 @@ add_executable(mirage_tcp_example
 target_link_libraries(mirage_tcp_example PRIVATE mirage_tcp)
 
 add_executable(mirage_tcp_tests
+    tests/test_checksum.cpp
     tests/test_main.cpp
 )
 target_link_libraries(mirage_tcp_tests PRIVATE mirage_tcp)
