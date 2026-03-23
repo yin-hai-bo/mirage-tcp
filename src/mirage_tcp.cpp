@@ -13,6 +13,18 @@ namespace mirage_tcp {
 
 namespace {
 
+ConnectionInfo::Address make_ipv4_address_storage(const in_addr& address) {
+    ConnectionInfo::Address value = {};
+    value.ipv4 = address;
+    return value;
+}
+
+ConnectionInfo::Address make_ipv6_address_storage(const in6_addr& address) {
+    ConnectionInfo::Address value = {};
+    value.ipv6 = address;
+    return value;
+}
+
 void write_u16_be(uint16_t value, uint8_t* bytes) {
     bytes[0] = static_cast<uint8_t>((value >> 8) & 0xff);
     bytes[1] = static_cast<uint8_t>(value & 0xff);
@@ -73,13 +85,27 @@ error_code_t parse_ipv6_tcp_packet(const void* packet, size_t packet_size) {
 
 }  // namespace
 
-ConnectionInfo::ConnectionInfo()
-    : client_port(0),
-      server_port(0),
-      ip_ver(0) {
-    std::memset(&client_ip, 0, sizeof(client_ip));
-    std::memset(&server_ip, 0, sizeof(server_ip));
-}
+ConnectionInfo::ConnectionInfo(
+    const in_addr& client_ipv4,
+    const in_addr& server_ipv4,
+    uint16_t client_port_value,
+    uint16_t server_port_value)
+    : client_ip(make_ipv4_address_storage(client_ipv4)),
+      server_ip(make_ipv4_address_storage(server_ipv4)),
+      client_port(client_port_value),
+      server_port(server_port_value),
+      ip_ver(4) {}
+
+ConnectionInfo::ConnectionInfo(
+    const in6_addr& client_ipv6,
+    const in6_addr& server_ipv6,
+    uint16_t client_port_value,
+    uint16_t server_port_value)
+    : client_ip(make_ipv6_address_storage(client_ipv6)),
+      server_ip(make_ipv6_address_storage(server_ipv6)),
+      client_port(client_port_value),
+      server_port(server_port_value),
+      ip_ver(6) {}
 
 bool operator<(const ConnectionInfo& left, const ConnectionInfo& right) {
     if (left.ip_ver != right.ip_ver) {
@@ -289,6 +315,18 @@ private:
         uint32_t client_next_sequence;
         uint32_t server_initial_sequence;
         uint32_t server_next_sequence;
+
+        Flow(
+            const ConnectionInfo& flow_connection_info,
+            FlowState flow_state,
+            uint32_t client_next_sequence_value,
+            uint32_t server_initial_sequence_value,
+            uint32_t server_next_sequence_value)
+            : connection_info(flow_connection_info),
+              state(flow_state),
+              client_next_sequence(client_next_sequence_value),
+              server_initial_sequence(server_initial_sequence_value),
+              server_next_sequence(server_next_sequence_value) {}
     };
 
     using FlowMap = std::unordered_map<ConnectionInfo, Flow, ConnectionInfoHash, ConnectionInfoEqual>;
@@ -300,18 +338,16 @@ private:
             return tcp_parse_result;
         }
 
-        ConnectionInfo key;
-        key.client_ip.ipv4 = ipv4_packet.source_address;
-        key.server_ip.ipv4 = ipv4_packet.destination_address;
-        key.client_port = tcp_segment.source_port;
-        key.server_port = tcp_segment.destination_port;
-        key.ip_ver = 4;
-
-        FlowMap::iterator it = ipv4_flows_.find(key);
+        const ConnectionInfo key(
+            ipv4_packet.source_address,
+            ipv4_packet.destination_address,
+            tcp_segment.source_port,
+            tcp_segment.destination_port);
         if (tcp_segment.is_syn() && !tcp_segment.is_ack()) {
             return handle_syn(key, tcp_segment.sequence_number);
         }
 
+        FlowMap::iterator it = ipv4_flows_.find(key);
         if (it == ipv4_flows_.end()) {
             if (tcp_segment.is_rst()) {
                 return ErrorCode::Ok;
@@ -383,12 +419,15 @@ private:
     }
 
     error_code_t handle_syn(const ConnectionInfo& connection_info, uint32_t client_sequence) {
-        Flow flow;
-        flow.connection_info = connection_info;
-        flow.state = FlowState::SynReceived;
-        flow.client_next_sequence = client_sequence + 1;
-        flow.server_initial_sequence = 7000 + static_cast<uint32_t>(ipv4_flows_.size()) * 1024U;
-        flow.server_next_sequence = flow.server_initial_sequence + 1;
+        const uint32_t client_next_sequence = client_sequence + 1;
+        const uint32_t server_initial_sequence = 7000 + static_cast<uint32_t>(ipv4_flows_.size()) * 1024U;
+        const uint32_t server_next_sequence = server_initial_sequence + 1;
+        const Flow flow(
+            connection_info,
+            FlowState::SynReceived,
+            client_next_sequence,
+            server_initial_sequence,
+            server_next_sequence);
 
         std::pair<FlowMap::iterator, bool> inserted =
             ipv4_flows_.insert(std::make_pair(connection_info, flow));
@@ -399,8 +438,8 @@ private:
 
         const error_code_t emit_result = emit_tcp_response(
                 connection_info,
-                flow.server_initial_sequence,
-                flow.client_next_sequence,
+                server_initial_sequence,
+                client_next_sequence,
                 TcpSegment::FlagsBuilder().set_syn().set_ack().flags(),
                 NULL,
                 0);

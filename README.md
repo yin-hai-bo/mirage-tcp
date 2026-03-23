@@ -84,7 +84,11 @@ if (result != 0) {
     // 可以直接透传或记录 int error code。
 }
 
-mirage_tcp::ConnectionInfo connection_info;
+mirage_tcp::ConnectionInfo connection_info(
+    client_ipv4,
+    server_ipv4,
+    client_port,
+    server_port);
 mirage_tcp.send_downstream_tcp_payload(connection_info, payload, payload_size);
 mirage_tcp.close_flow(connection_info);
 ```

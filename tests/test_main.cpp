@@ -94,13 +94,11 @@ mirage_tcp::MirageTcp make_mirage_tcp(CallbackContext* context) {
 }
 
 mirage_tcp::ConnectionInfo make_flow() {
-    mirage_tcp::ConnectionInfo flow;
-    flow.client_ip.ipv4 = make_ipv4_address(10, 0, 0, 1);
-    flow.server_ip.ipv4 = make_ipv4_address(93, 184, 216, 34);
-    flow.client_port = 49152;
-    flow.server_port = 443;
-    flow.ip_ver = 4;
-    return flow;
+    return mirage_tcp::ConnectionInfo(
+        make_ipv4_address(10, 0, 0, 1),
+        make_ipv4_address(93, 184, 216, 34),
+        49152,
+        443);
 }
 
 std::vector<std::uint8_t> build_client_packet(
@@ -191,34 +189,42 @@ void test_ipv4_roundtrip() {
 
 void test_connection_info_equal_checks_ports_before_ip_for_ipv4() {
     mirage_tcp::ConnectionInfo left = make_flow();
-    mirage_tcp::ConnectionInfo right = left;
-
-    right.client_port = static_cast<std::uint16_t>(left.client_port + 1);
-    right.client_ip.ipv4 = make_ipv4_address(10, 0, 0, 99);
-    right.server_ip.ipv4 = make_ipv4_address(93, 184, 216, 99);
+    mirage_tcp::ConnectionInfo right(
+        make_ipv4_address(10, 0, 0, 99),
+        make_ipv4_address(93, 184, 216, 99),
+        static_cast<std::uint16_t>(left.client_port + 1),
+        left.server_port);
 
     require(!(left == right), "ipv4 equality should fail when client port differs");
 
-    right = left;
-    right.server_port = static_cast<std::uint16_t>(left.server_port + 1);
-    right.client_ip.ipv4 = make_ipv4_address(10, 0, 0, 99);
-    right.server_ip.ipv4 = make_ipv4_address(93, 184, 216, 99);
+    const mirage_tcp::ConnectionInfo different_server_port(
+        make_ipv4_address(10, 0, 0, 99),
+        make_ipv4_address(93, 184, 216, 99),
+        left.client_port,
+        static_cast<std::uint16_t>(left.server_port + 1));
 
-    require(!(left == right), "ipv4 equality should fail when server port differs");
+    require(!(left == different_server_port), "ipv4 equality should fail when server port differs");
 }
 
 void test_connection_info_equal_uses_ipv4_s_addr() {
     mirage_tcp::ConnectionInfo left = make_flow();
-    mirage_tcp::ConnectionInfo right = left;
+    mirage_tcp::ConnectionInfo right = make_flow();
 
     require(left == right, "identical ipv4 flows should compare equal");
 
-    right.client_ip.ipv4 = make_ipv4_address(10, 0, 0, 2);
-    require(!(left == right), "ipv4 equality should compare client address by s_addr");
+    const mirage_tcp::ConnectionInfo different_client_ip(
+        make_ipv4_address(10, 0, 0, 2),
+        right.server_ip.ipv4,
+        right.client_port,
+        right.server_port);
+    require(!(left == different_client_ip), "ipv4 equality should compare client address by s_addr");
 
-    right = left;
-    right.server_ip.ipv4 = make_ipv4_address(93, 184, 216, 35);
-    require(!(left == right), "ipv4 equality should compare server address by s_addr");
+    const mirage_tcp::ConnectionInfo different_server_ip(
+        right.client_ip.ipv4,
+        make_ipv4_address(93, 184, 216, 35),
+        right.client_port,
+        right.server_port);
+    require(!(left == different_server_ip), "ipv4 equality should compare server address by s_addr");
 }
 
 void test_connection_info_equal_uses_memcmp_for_ipv6() {
@@ -226,18 +232,21 @@ void test_connection_info_equal_uses_memcmp_for_ipv6() {
     const std::uint8_t server_bytes[16] = {0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 2};
     const std::uint8_t different_server_bytes[16] = {0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 3};
 
-    mirage_tcp::ConnectionInfo left;
-    left.ip_ver = 6;
-    left.client_port = 12345;
-    left.server_port = 443;
-    left.client_ip.ipv6 = make_ipv6_address(client_bytes);
-    left.server_ip.ipv6 = make_ipv6_address(server_bytes);
+    mirage_tcp::ConnectionInfo left(
+        make_ipv6_address(client_bytes),
+        make_ipv6_address(server_bytes),
+        12345,
+        443);
 
     mirage_tcp::ConnectionInfo right = left;
     require(left == right, "identical ipv6 flows should compare equal");
 
-    right.server_ip.ipv6 = make_ipv6_address(different_server_bytes);
-    require(!(left == right), "ipv6 equality should compare full address bytes");
+    const mirage_tcp::ConnectionInfo different_server_ip(
+        make_ipv6_address(client_bytes),
+        make_ipv6_address(different_server_bytes),
+        12345,
+        443);
+    require(!(left == different_server_ip), "ipv6 equality should compare full address bytes");
 }
 
 void test_connection_info_hash_and_equal_work_with_unordered_map() {
@@ -245,12 +254,15 @@ void test_connection_info_hash_and_equal_work_with_unordered_map() {
     std::unordered_map<mirage_tcp::ConnectionInfo, int, mirage_tcp::ConnectionInfoHash, mirage_tcp::ConnectionInfoEqual> values;
     values.insert(std::make_pair(flow, 7));
 
-    mirage_tcp::ConnectionInfo same_flow = flow;
+    const mirage_tcp::ConnectionInfo same_flow = flow;
     require(values.find(same_flow) != values.end(), "unordered_map should find equivalent connection info");
     require(values.find(same_flow)->second == 7, "unordered_map should preserve stored value");
 
-    mirage_tcp::ConnectionInfo different_port = flow;
-    different_port.client_port = static_cast<std::uint16_t>(flow.client_port + 1);
+    const mirage_tcp::ConnectionInfo different_port(
+        flow.client_ip.ipv4,
+        flow.server_ip.ipv4,
+        static_cast<std::uint16_t>(flow.client_port + 1),
+        flow.server_port);
     require(values.find(different_port) == values.end(), "unordered_map should not match different port");
 }
 

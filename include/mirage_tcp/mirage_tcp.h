@@ -33,17 +33,27 @@ struct ConnectionInfo {
     };
 
     /** @brief Client IP address. */
-    Address client_ip;
+    const Address client_ip;
     /** @brief Server IP address. */
-    Address server_ip;
+    const Address server_ip;
     /** @brief Client TCP port. */
-    uint16_t client_port;
+    const uint16_t client_port;
     /** @brief Server TCP port. */
-    uint16_t server_port;
+    const uint16_t server_port;
     /** @brief IP version, currently 4 or 6. */
-    uint8_t ip_ver;
+    const uint8_t ip_ver;
 
-    ConnectionInfo();
+    ConnectionInfo(
+        const in_addr& client_ipv4,
+        const in_addr& server_ipv4,
+        uint16_t client_port,
+        uint16_t server_port);
+
+    ConnectionInfo(
+        const in6_addr& client_ipv6,
+        const in6_addr& server_ipv6,
+        uint16_t client_port,
+        uint16_t server_port);
 };
 
 /**
