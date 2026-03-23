@@ -1,5 +1,5 @@
-#ifndef MIRAGE_TCP_TYPEDEFS_H
-#define MIRAGE_TCP_TYPEDEFS_H
+#ifndef MIRAGE_TCP_TYPES_H
+#define MIRAGE_TCP_TYPES_H
 
 namespace mirage_tcp {
 

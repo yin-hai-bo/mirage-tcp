@@ -13,6 +13,8 @@ using std::uint8_t;
  * @brief Fixed IPv6 header bytes in network byte order.
  */
 struct Ip6Head {
+    static constexpr uint8_t VERSION = 6U;
+
     uint32_t ver_tc_flow_label;
     uint16_t payload_length;
     uint8_t next_header;

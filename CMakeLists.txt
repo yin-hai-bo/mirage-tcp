@@ -10,6 +10,7 @@ add_library(mirage_tcp STATIC
     src/checksum.cpp
     src/ipv4_packet.cpp
     src/mirage_tcp.cpp
+    src/packet_buffer_pool.cpp
     src/tcp_segment.cpp
 )
 

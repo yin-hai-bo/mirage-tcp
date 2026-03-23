@@ -55,7 +55,7 @@ error_code_t parse_ipv4_tcp_packet(
     Ip4Head head;
     std::memcpy(&head, packet, sizeof(head));
 
-    if (head.version() != 4) {
+    if (head.version() != Ip4Head::VERSION) {
         return ErrorCode::UnsupportedIpVersion;
     }
 

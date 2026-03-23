@@ -6,7 +6,7 @@
 
 #include <vector>
 
-#include "mirage_tcp/typedefs.h"
+#include "mirage_tcp/types.h"
 #include "mirage_tcp/error_code.h"
 
 namespace mirage_tcp {
@@ -98,4 +98,3 @@ std::vector<uint8_t> serialize_tcp_segment(const TcpSegment& segment);
 }  // namespace mirage_tcp
 
 #endif
-

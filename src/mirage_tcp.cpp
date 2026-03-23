@@ -1,14 +1,14 @@
 #include "mirage_tcp/checksum.h"
 #include "mirage_tcp/mirage_tcp.h"
 #include "mirage_tcp/ipv4_packet.h"
+#include "mirage_tcp/tcp_head.h"
 #include "mirage_tcp/tcp_segment.h"
 #include "ipv4_packet_internal.h"
+#include "packet_buffer_pool.h"
 
 #include <cassert>
 #include <cstring>
 #include <unordered_map>
-#include <vector>
-
 namespace mirage_tcp {
 
 namespace {
@@ -30,39 +30,58 @@ void write_u16_be(uint16_t value, uint8_t* bytes) {
     bytes[1] = static_cast<uint8_t>(value & 0xff);
 }
 
-std::vector<uint8_t> serialize_tcp_segment_with_checksum(
+void write_u32_be(uint32_t value, uint8_t* bytes) {
+    bytes[0] = static_cast<uint8_t>((value >> 24) & 0xff);
+    bytes[1] = static_cast<uint8_t>((value >> 16) & 0xff);
+    bytes[2] = static_cast<uint8_t>((value >> 8) & 0xff);
+    bytes[3] = static_cast<uint8_t>(value & 0xff);
+}
+
+size_t serialized_tcp_segment_size(size_t payload_size) {
+    return sizeof(TcpHead) + payload_size;
+}
+
+void write_ipv4_header(const Ip4Head& head, size_t total_size, uint8_t* bytes) {
+    std::memcpy(bytes, &head, sizeof(head));
+    write_u16_be(static_cast<uint16_t>(total_size), bytes + 2);
+    write_u16_be(0, bytes + 10);
+    const uint16_t checksum = static_cast<uint16_t>(~Checksum::Calculate(bytes, sizeof(Ip4Head)));
+    write_u16_be(checksum, bytes + 10);
+}
+
+void serialize_tcp_segment_with_checksum(
     const ConnectionInfo& connection_info,
     uint32_t sequence_number,
     uint32_t acknowledgment_number,
     uint8_t flags,
     const void* payload,
-    size_t payload_size) {
-    TcpSegment segment;
-    segment.source_port = connection_info.server_port;
-    segment.destination_port = connection_info.client_port;
-    segment.sequence_number = sequence_number;
-    segment.acknowledgment_number = acknowledgment_number;
-    segment.window_size = 65535;
-    segment.flags = flags;
+    size_t payload_size,
+    uint8_t* bytes)
+{
+    const size_t tcp_size = serialized_tcp_segment_size(payload_size);
+    std::memset(bytes, 0, tcp_size);
+    write_u16_be(connection_info.server_port, bytes + offsetof(TcpHead, source_port));
+    write_u16_be(connection_info.client_port, bytes + offsetof(TcpHead, destination_port));
+    write_u32_be(sequence_number, bytes + offsetof(TcpHead, sequence_number));
+    write_u32_be(acknowledgment_number, bytes + offsetof(TcpHead, acknowledgment_number));
+    bytes[offsetof(TcpHead, data_offset_reserved)] = static_cast<uint8_t>(5U << 4);
+    bytes[offsetof(TcpHead, flags)] = flags;
+    write_u16_be(65535, bytes + offsetof(TcpHead, window_size));
+
     if (payload != NULL && payload_size > 0) {
         const uint8_t* payload_bytes = static_cast<const uint8_t*>(payload);
-        segment.payload.assign(payload_bytes, payload_bytes + static_cast<std::ptrdiff_t>(payload_size));
+        std::memcpy(bytes + sizeof(TcpHead), payload_bytes, payload_size);
     }
 
-    std::vector<uint8_t> bytes = serialize_tcp_segment(segment);
-    std::vector<uint8_t> pseudo_header(12 + bytes.size() + (bytes.size() % 2U), 0);
+    uint8_t pseudo_header[12] = {};
     std::memcpy(&pseudo_header[0], &connection_info.server_ip.ipv4, 4);
     std::memcpy(&pseudo_header[4], &connection_info.client_ip.ipv4, 4);
-    pseudo_header[9] = 6;
-    write_u16_be(static_cast<uint16_t>(bytes.size()), &pseudo_header[10]);
-    for (size_t i = 0; i < bytes.size(); ++i) {
-        pseudo_header[12 + i] = bytes[i];
-    }
+    pseudo_header[9] = IP_PROTOCOL_TCP;
+    write_u16_be(static_cast<uint16_t>(tcp_size), &pseudo_header[10]);
 
-    write_u16_be(0, &bytes[16]);
-    const uint16_t checksum = ~Checksum::Calculate(&pseudo_header[0], pseudo_header.size());
-    write_u16_be(checksum, &bytes[16]);
-    return bytes;
+    const uint16_t pseudo_header_sum = Checksum::Calculate(&pseudo_header[0], sizeof(pseudo_header));
+    const uint16_t checksum = static_cast<uint16_t>(~Checksum::Calculate(bytes, tcp_size, pseudo_header_sum));
+    write_u16_be(checksum, bytes + offsetof(TcpHead, checksum));
 }
 
 error_code_t parse_ipv6_tcp_packet(const void* packet, size_t packet_size) {
@@ -76,7 +95,7 @@ error_code_t parse_ipv6_tcp_packet(const void* packet, size_t packet_size) {
 
     const uint8_t* bytes = static_cast<const uint8_t*>(packet);
     const uint8_t version = static_cast<uint8_t>(bytes[0] >> 4);
-    if (version != 6) {
+    if (version != Ip6Head::VERSION) {
         return ErrorCode::UnsupportedIpVersion;
     }
 
@@ -581,32 +600,44 @@ private:
         uint8_t flags,
         const void* payload,
         size_t payload_size) {
-        const std::vector<uint8_t> tcp_bytes = serialize_tcp_segment_with_checksum(
+        const size_t ipv4_header_size = sizeof(Ip4Head);
+        const size_t tcp_size = serialized_tcp_segment_size(payload_size);
+        const size_t packet_size = ipv4_header_size + tcp_size;
+        if (packet_size > PacketBufferPool::BUFFER_CAPACITY) {
+            return ErrorCode::PacketEmitFailed;
+        }
+
+        PacketBufferLease packet_buffer(packet_buffer_pool_);
+        uint8_t* const packet_bytes = packet_buffer.data();
+        if (packet_bytes == nullptr) {
+            return ErrorCode::PacketEmitFailed;
+        }
+
+        Ip4Head head = {};
+        head.version_ihl = 0x45;
+        head.ttl = 64;
+        head.protocol = IP_PROTOCOL_TCP;
+        std::memcpy(&head.source_address, &connection_info.server_ip.ipv4, sizeof(head.source_address));
+        std::memcpy(&head.destination_address, &connection_info.client_ip.ipv4, sizeof(head.destination_address));
+
+        write_ipv4_header(head, packet_size, packet_bytes);
+        serialize_tcp_segment_with_checksum(
             connection_info,
             sequence_number,
             acknowledgment_number,
             flags,
             payload,
-            payload_size);
+            payload_size,
+            packet_bytes + ipv4_header_size);
 
-        std::vector<uint8_t> ipv4_bytes;
-        Ip4Head head = {};
-        head.version_ihl = 0x45;
-        head.ttl = 64;
-        head.protocol = 6;
-        std::memcpy(&head.source_address, &connection_info.server_ip.ipv4, sizeof(head.source_address));
-        std::memcpy(&head.destination_address, &connection_info.client_ip.ipv4, sizeof(head.destination_address));
-        const error_code_t serialize_result = serialize_ipv4_packet(head, &tcp_bytes[0], tcp_bytes.size(), &ipv4_bytes);
-        if (serialize_result != ErrorCode::Ok) {
-            return ErrorCode::PacketEmitFailed;
-        }
-        emit_downstream_ip_packet(&ipv4_bytes[0], ipv4_bytes.size());
+        emit_downstream_ip_packet(packet_bytes, packet_size);
         return ErrorCode::Ok;
     }
 
 private:
     MirageTcpCallbacks callbacks_;
     FlowMap ipv4_flows_;
+    PacketBufferPool packet_buffer_pool_;
 };
 
 MirageTcp::MirageTcp(const MirageTcpCallbacks& callbacks)

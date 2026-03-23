@@ -125,7 +125,7 @@ std::vector<std::uint8_t> build_client_packet(
     mirage_tcp::Ip4Head head = {};
     head.version_ihl = 0x45;
     head.ttl = 64;
-    head.protocol = 6;
+    head.protocol = mirage_tcp::IP_PROTOCOL_TCP;
     std::memcpy(&head.source_address, &flow.client_ip.ipv4, sizeof(head.source_address));
     std::memcpy(&head.destination_address, &flow.server_ip.ipv4, sizeof(head.destination_address));
     std::vector<std::uint8_t> bytes;
@@ -155,7 +155,7 @@ void test_ipv4_roundtrip() {
     const mirage_tcp::in_addr destination_address = make_ipv4_address(10, 0, 0, 2);
     head.version_ihl = 0x45;
     head.ttl = 42;
-    head.protocol = 6;
+    head.protocol = mirage_tcp::IP_PROTOCOL_TCP;
     std::memcpy(&head.source_address, &source_address, sizeof(head.source_address));
     std::memcpy(&head.destination_address, &destination_address, sizeof(head.destination_address));
     std::vector<std::uint8_t> payload(5, 0x11);
@@ -431,7 +431,7 @@ void test_ipv6_tcp_packet_reports_unsupported() {
 
     std::vector<std::uint8_t> ipv6_packet(40, 0);
     ipv6_packet[0] = 0x60;
-    ipv6_packet[6] = 6;
+    ipv6_packet[6] = mirage_tcp::IP_PROTOCOL_TCP;
 
     require(
         mirage_tcp.handle_incoming_ip_packet(&ipv6_packet[0], ipv6_packet.size()) == mirage_tcp::ErrorCode::Unsupported,

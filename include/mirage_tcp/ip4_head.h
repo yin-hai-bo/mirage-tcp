@@ -4,6 +4,8 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "mirage_tcp/constants.h"
+
 namespace mirage_tcp {
 
 using std::uint16_t;
@@ -14,6 +16,8 @@ using std::uint8_t;
  * @brief Fixed IPv4 header bytes in network byte order.
  */
 struct Ip4Head {
+    static constexpr uint8_t VERSION = 4U;
+
     uint8_t version_ihl;
     uint8_t dscp_ecn;
     uint16_t total_length;
@@ -34,7 +38,7 @@ struct Ip4Head {
     }
 
     bool is_tcp() const {
-        return protocol == 6;
+        return protocol == IP_PROTOCOL_TCP;
     }
 };
 

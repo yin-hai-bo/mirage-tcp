@@ -13,7 +13,7 @@
 #endif
 
 #include "mirage_tcp/ip6_head.h"
-#include "mirage_tcp/typedefs.h"
+#include "mirage_tcp/types.h"
 
 namespace mirage_tcp {
 

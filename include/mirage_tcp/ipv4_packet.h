@@ -12,7 +12,7 @@
 #include <netinet/in.h>
 #endif
 
-#include "mirage_tcp/typedefs.h"
+#include "mirage_tcp/types.h"
 #include "mirage_tcp/error_code.h"
 #include "mirage_tcp/ip4_head.h"
 
