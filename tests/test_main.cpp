@@ -23,7 +23,6 @@ struct CallbackContext {
     std::vector<std::vector<std::uint8_t> > payloads;
     std::vector<mirage_tcp::ConnectionInfo> closed_flows;
     std::vector<mirage_tcp::ConnectionInfo> reset_flows;
-    std::vector<mirage_tcp::error_code_t> errors;
 };
 
 void on_downstream_ip_packet_generated(void* user_data, const void* ip_packet, std::size_t ip_packet_size) {
@@ -76,11 +75,6 @@ void on_tcp_connection_reset(void* user_data, const mirage_tcp::ConnectionInfo& 
     context->reset_flows.push_back(connection_info);
 }
 
-void on_error(void* user_data, mirage_tcp::error_code_t error_code) {
-    CallbackContext* context = static_cast<CallbackContext*>(user_data);
-    context->errors.push_back(error_code);
-}
-
 mirage_tcp::MirageTcp make_mirage_tcp(CallbackContext* context) {
     mirage_tcp::MirageTcpCallbacks callbacks;
     callbacks.user_data = context;
@@ -89,7 +83,6 @@ mirage_tcp::MirageTcp make_mirage_tcp(CallbackContext* context) {
     callbacks.on_tcp_payload_received = on_tcp_payload_received;
     callbacks.on_tcp_connection_closed = on_tcp_connection_closed;
     callbacks.on_tcp_connection_reset = on_tcp_connection_reset;
-    callbacks.on_error = on_error;
     return mirage_tcp::MirageTcp(callbacks);
 }
 
@@ -408,7 +401,6 @@ void test_invalid_flow_reports_error() {
         false,
         std::vector<std::uint8_t>());
     require(mirage_tcp.handle_incoming_ip_packet(&ack_packet[0], ack_packet.size()) == mirage_tcp::ErrorCode::FlowNotFound, "unknown flow should be handled with reset");
-    require(context.errors.empty(), "unknown flow should not emit error callback");
     require(context.downstream_packets.size() == 1, "unknown flow should generate one reset packet");
     mirage_tcp::TcpSegment reset = parse_tcp_from_ip(context.downstream_packets[0]);
     require(reset.is_rst(), "unknown flow response should be RST");
@@ -421,7 +413,6 @@ void test_null_packet_returns_invalid_argument_without_error_callback() {
     require(
         mirage_tcp.handle_incoming_ip_packet(NULL, 20) == mirage_tcp::ErrorCode::InvalidArgument,
         "null packet should return invalid argument");
-    require(context.errors.empty(), "null packet should not emit error callback");
 }
 
 void test_short_packet_returns_packet_too_short_without_error_callback() {
@@ -432,7 +423,6 @@ void test_short_packet_returns_packet_too_short_without_error_callback() {
     require(
         mirage_tcp.handle_incoming_ip_packet(packet, sizeof(packet)) == mirage_tcp::ErrorCode::PacketTooShort,
         "short packet should return packet too short");
-    require(context.errors.empty(), "short packet should not emit error callback");
 }
 
 void test_ipv6_tcp_packet_reports_unsupported() {
@@ -446,7 +436,6 @@ void test_ipv6_tcp_packet_reports_unsupported() {
     require(
         mirage_tcp.handle_incoming_ip_packet(&ipv6_packet[0], ipv6_packet.size()) == mirage_tcp::ErrorCode::Unsupported,
         "ipv6 tcp packet should report unsupported");
-    require(context.errors.empty(), "ipv6 tcp packet should not emit error callback");
 }
 
 void test_ipv4_non_tcp_packet_reports_is_not_tcp() {
@@ -469,7 +458,6 @@ void test_ipv4_non_tcp_packet_reports_is_not_tcp() {
     require(
         mirage_tcp.handle_incoming_ip_packet(&packet[0], packet.size()) == mirage_tcp::ErrorCode::IsNotTcp,
         "ipv4 non-tcp packet should report is not tcp");
-    require(context.errors.empty(), "ipv4 non-tcp packet should not emit error callback");
 }
 
 void test_send_downstream_payload_generates_data_segment() {

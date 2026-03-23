@@ -17,7 +17,6 @@
   `ip_ver` 使用 `4` 或 `6` 标识当前地址族。
 - 当前实现仍然只处理 `IPv4/TCP`，但公共连接标识已经按双栈形式预留。
 - `handle_incoming_ip_packet(...)`、`send_downstream_tcp_payload(...)`、`close_flow(...)` 返回 `error_code_t`，底层类型为 `int`，`0` 表示成功。
-- `MirageTcpCallbacks::on_error` 只上报 `error_code_t error_code`。
 
 ## 错误处理约定
 
@@ -75,7 +74,6 @@ mirage_tcp::MirageTcpCallbacks callbacks;
 callbacks.on_downstream_ip_packet_generated = my_packet_callback;
 callbacks.on_tcp_handshake_completed = my_handshake_callback;
 callbacks.on_tcp_connection_reset = my_reset_callback;
-callbacks.on_error = my_error_code_callback;
 
 mirage_tcp::MirageTcp mirage_tcp(callbacks);
 mirage_tcp::error_code_t result = mirage_tcp.handle_incoming_ip_packet(ip_packet, ip_packet_size);

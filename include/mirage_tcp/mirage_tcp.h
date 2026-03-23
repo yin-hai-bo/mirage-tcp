@@ -93,10 +93,6 @@ typedef void (*TcpConnectionResetCallback)(
     void* user_data,
     const ConnectionInfo& connection_info);
 
-typedef void (*MirageTcpErrorCallback)(
-    void* user_data,
-    error_code_t error_code);
-
 /**
  * @brief Host-provided callbacks used to observe MirageTCP output.
  */
@@ -112,8 +108,6 @@ struct MirageTcpCallbacks {
     TcpConnectionClosedCallback on_tcp_connection_closed;
     /** @brief Fired when the flow is reset or discarded. */
     TcpConnectionResetCallback on_tcp_connection_reset;
-    /** @brief Fired when packet parsing or flow validation fails. */
-    MirageTcpErrorCallback on_error;
 
     MirageTcpCallbacks();
 };

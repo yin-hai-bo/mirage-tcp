@@ -192,8 +192,7 @@ MirageTcpCallbacks::MirageTcpCallbacks()
       on_tcp_handshake_completed(NULL),
       on_tcp_payload_received(NULL),
       on_tcp_connection_closed(NULL),
-      on_tcp_connection_reset(NULL),
-      on_error(NULL) {}
+      on_tcp_connection_reset(NULL) {}
 
 class MirageTcp::Impl {
 public:
@@ -233,23 +232,19 @@ public:
         size_t payload_size)
     {
         if (payload == nullptr || payload_size == 0) {
-            emit_error(ErrorCode::PayloadEmpty);
             return ErrorCode::PayloadEmpty;
         }
 
         if (connection_info.ip_ver != 4) {
-            emit_error(ErrorCode::Ipv4OnlyOperation);
             return ErrorCode::Ipv4OnlyOperation;
         }
 
         FlowMap::iterator it = ipv4_flows_.find(connection_info);
         if (it == ipv4_flows_.end()) {
-            emit_error(ErrorCode::FlowNotFound);
             return ErrorCode::FlowNotFound;
         }
 
         if (it->second.state != FlowState::Established) {
-            emit_error(ErrorCode::SendBeforeEstablished);
             return ErrorCode::SendBeforeEstablished;
         }
 
@@ -270,18 +265,15 @@ public:
 
     error_code_t close_flow(const ConnectionInfo& connection_info) {
         if (connection_info.ip_ver != 4) {
-            emit_error(ErrorCode::Ipv4OnlyOperation);
             return ErrorCode::Ipv4OnlyOperation;
         }
 
         FlowMap::iterator it = ipv4_flows_.find(connection_info);
         if (it == ipv4_flows_.end()) {
-            emit_error(ErrorCode::FlowNotFound);
             return ErrorCode::FlowNotFound;
         }
 
         if (it->second.state != FlowState::Established) {
-            emit_error(ErrorCode::CloseBeforeEstablished);
             return ErrorCode::CloseBeforeEstablished;
         }
 
@@ -313,19 +305,16 @@ private:
         ConnectionInfo connection_info;
         FlowState state;
         uint32_t client_next_sequence;
-        uint32_t server_initial_sequence;
         uint32_t server_next_sequence;
 
         Flow(
             const ConnectionInfo& flow_connection_info,
             FlowState flow_state,
             uint32_t client_next_sequence_value,
-            uint32_t server_initial_sequence_value,
             uint32_t server_next_sequence_value)
             : connection_info(flow_connection_info),
               state(flow_state),
               client_next_sequence(client_next_sequence_value),
-              server_initial_sequence(server_initial_sequence_value),
               server_next_sequence(server_next_sequence_value) {}
     };
 
@@ -400,12 +389,6 @@ private:
         return handle_last_ack_packet(flow, tcp_segment);
     }
 
-    void emit_error(error_code_t error_code) const {
-        if (callbacks_.on_error != NULL) {
-            callbacks_.on_error(callbacks_.user_data, error_code);
-        }
-    }
-
     void emit_downstream_ip_packet(const void* ip_packet, size_t ip_packet_size) const {
         if (callbacks_.on_downstream_ip_packet_generated != NULL) {
             callbacks_.on_downstream_ip_packet_generated(callbacks_.user_data, ip_packet, ip_packet_size);
@@ -420,25 +403,25 @@ private:
 
     error_code_t handle_syn(const ConnectionInfo& connection_info, uint32_t client_sequence) {
         const uint32_t client_next_sequence = client_sequence + 1;
-        const uint32_t server_initial_sequence = 7000 + static_cast<uint32_t>(ipv4_flows_.size()) * 1024U;
-        const uint32_t server_next_sequence = server_initial_sequence + 1;
+        // Keep the server ISN deterministic so packet-level tests can assert
+        // exact sequence behavior without relying on a random source.
+        const uint32_t server_sequence_for_syn_ack = 7000 + static_cast<uint32_t>(ipv4_flows_.size()) * 1024U;
+        const uint32_t server_next_sequence = server_sequence_for_syn_ack + 1;
         const Flow flow(
             connection_info,
             FlowState::SynReceived,
             client_next_sequence,
-            server_initial_sequence,
             server_next_sequence);
 
-        std::pair<FlowMap::iterator, bool> inserted =
+        const auto inserted =
             ipv4_flows_.insert(std::make_pair(connection_info, flow));
         if (!inserted.second) {
-            emit_error(ErrorCode::FlowAlreadyExists);
             return ErrorCode::FlowAlreadyExists;
         }
 
         const error_code_t emit_result = emit_tcp_response(
                 connection_info,
-                server_initial_sequence,
+                server_sequence_for_syn_ack,
                 client_next_sequence,
                 TcpSegment::FlagsBuilder().set_syn().set_ack().flags(),
                 NULL,
@@ -615,7 +598,6 @@ private:
         std::memcpy(&head.destination_address, &connection_info.client_ip.ipv4, sizeof(head.destination_address));
         const error_code_t serialize_result = serialize_ipv4_packet(head, &tcp_bytes[0], tcp_bytes.size(), &ipv4_bytes);
         if (serialize_result != ErrorCode::Ok) {
-            emit_error(ErrorCode::PacketEmitFailed);
             return ErrorCode::PacketEmitFailed;
         }
         emit_downstream_ip_packet(&ipv4_bytes[0], ipv4_bytes.size());
