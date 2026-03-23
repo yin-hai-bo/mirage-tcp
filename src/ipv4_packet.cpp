@@ -3,12 +3,6 @@
 #include <cassert>
 #include <cstring>
 
-#if defined(_WIN32)
-#include <winsock2.h>
-#else
-#include <netinet/in.h>
-#endif
-
 namespace mirage_tcp {
 
 namespace {
@@ -47,14 +41,6 @@ uint16_t internet_checksum(const uint8_t* data, size_t size) {
     return static_cast<uint16_t>(~sum);
 }
 
-uint8_t ip4_version(const Ip4Head& head) {
-    return static_cast<uint8_t>(head.version_ihl >> 4);
-}
-
-uint8_t ip4_header_length_words(const Ip4Head& head) {
-    return static_cast<uint8_t>(head.version_ihl & 0x0fU);
-}
-
 }  // namespace
 
 error_code_t parse_ipv4_tcp_packet(
@@ -66,19 +52,18 @@ error_code_t parse_ipv4_tcp_packet(
         return ErrorCode::PacketTooShort;
     }
 
-    assert(reinterpret_cast<std::uintptr_t>(packet) % alignof(Ip4Head) == 0U);
-    const Ip4Head & head = *static_cast<const Ip4Head*>(packet);
-    if (ip4_version(head) != 4) {
+    Ip4Head head;
+    std::memcpy(&head, packet, sizeof(head));
+
+    if (head.version() != 4) {
         return ErrorCode::UnsupportedIpVersion;
     }
 
-    const uint8_t TCP_PROTOCOL_NUM = 6;
-    if (head.protocol != TCP_PROTOCOL_NUM) {
+    if (!head.is_tcp()) {
         return ErrorCode::IsNotTcp;
     }
 
-    const uint8_t ihl_words = ip4_header_length_words(head);
-    const size_t header_size = static_cast<size_t>(ihl_words) * 4U;
+    const size_t header_size = head.header_length();
     if (header_size < sizeof(Ip4Head)) {
         return ErrorCode::InvalidIpv4HeaderLength;
     }
@@ -93,9 +78,10 @@ error_code_t parse_ipv4_tcp_packet(
         return ErrorCode::Ipv4FragmentUnsupported;
     }
 
-    result.head = &head;
-    result.payload = static_cast<const uint8_t*>(packet) + header_size;
-    result.payload_size = total_length - header_size;
+    result.set(
+        head,
+        static_cast<const uint8_t*>(packet) + header_size,
+        total_length - header_size);
     return ErrorCode::Ok;
 }
 

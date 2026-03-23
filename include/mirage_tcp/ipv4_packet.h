@@ -6,6 +6,12 @@
 
 #include <vector>
 
+#if defined(_WIN32)
+#include <winsock2.h>
+#else
+#include <netinet/in.h>
+#endif
+
 #include "mirage_tcp/typedefs.h"
 #include "mirage_tcp/error_code.h"
 #include "mirage_tcp/ip4_head.h"
@@ -20,12 +26,29 @@ using std::uint32_t;
  * @brief Non-owning view of one IPv4 packet.
  */
 struct Ip4PacketView {
-    /** @brief Pointer to the fixed IPv4 header inside the original packet buffer. */
-    const Ip4Head* head;
+
+    /** @brief IPv4 source address copied from the fixed header. */
+    in_addr source_address;
+
+    /** @brief IPv4 destination address copied from the fixed header. */
+    in_addr destination_address;
+
     /** @brief Pointer to the payload bytes inside the original packet buffer. */
     const uint8_t* payload;
+
     /** @brief Payload size in bytes. */
     size_t payload_size;
+
+    void set(
+        const Ip4Head & head,
+        const uint8_t * payload,
+        size_t payload_size)
+    {
+        this->source_address.s_addr = head.source_address;
+        this->destination_address.s_addr = head.destination_address;
+        this->payload = payload;
+        this->payload_size = payload_size;
+    }
 };
 
 /**
@@ -46,4 +69,3 @@ error_code_t serialize_ipv4_packet(
 }  // namespace mirage_tcp
 
 #endif
-

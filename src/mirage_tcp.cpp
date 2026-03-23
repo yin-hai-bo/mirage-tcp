@@ -336,8 +336,8 @@ private:
         }
 
         ConnectionInfo key;
-        key.client_ip.ipv4.s_addr = ipv4_packet.head->source_address;
-        key.server_ip.ipv4.s_addr = ipv4_packet.head->destination_address;
+        key.client_ip.ipv4 = ipv4_packet.source_address;
+        key.server_ip.ipv4 = ipv4_packet.destination_address;
         key.client_port = tcp_segment.source_port;
         key.server_port = tcp_segment.destination_port;
         key.ip_ver = 4;
