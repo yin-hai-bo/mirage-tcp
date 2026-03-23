@@ -14,6 +14,8 @@
 
 namespace {
 
+using mirage_tcp::TcpSegment;
+
 struct TestCase {
     const char* name;
     std::function<void()> run;
@@ -125,10 +127,17 @@ std::vector<std::uint8_t> build_client_packet(
     segment.sequence_number = sequence_number;
     segment.acknowledgment_number = acknowledgment_number;
     segment.window_size = 65535;
-    segment.syn = syn;
-    segment.ack = ack;
-    segment.fin = fin;
-    segment.rst = false;
+    TcpSegment::FlagsBuilder flags_builder;
+    if (syn) {
+        flags_builder.set_syn();
+    }
+    if (ack) {
+        flags_builder.set_ack();
+    }
+    if (fin) {
+        flags_builder.set_fin();
+    }
+    segment.flags = flags_builder.flags();
     segment.payload = payload;
 
     const std::vector<std::uint8_t> tcp_bytes = mirage_tcp::serialize_tcp_segment(segment);
@@ -266,9 +275,9 @@ void test_syn_generates_downstream_syn_ack() {
     require(context.handshakes.empty(), "handshake should not complete after SYN only");
 
     mirage_tcp::TcpSegment response = parse_tcp_from_ip(context.downstream_packets[0]);
-    require(response.syn, "response should contain SYN");
-    require(response.ack, "response should contain ACK");
-    require(!response.fin, "response should not contain FIN");
+    require(response.is_syn(), "response should contain SYN");
+    require(response.is_ack(), "response should contain ACK");
+    require(!response.is_fin(), "response should not contain FIN");
     require(response.acknowledgment_number == 1001, "SYN+ACK must acknowledge client SYN");
 }
 
@@ -332,7 +341,7 @@ void test_payload_is_reported_and_acked() {
     require(context.payloads[0] == payload, "payload callback content mismatch");
     require(context.downstream_packets.size() == 2, "payload should generate one ACK packet");
     mirage_tcp::TcpSegment ack_only = parse_tcp_from_ip(context.downstream_packets[1]);
-    require(ack_only.ack, "payload response should ACK");
+    require(ack_only.is_ack(), "payload response should ACK");
     require(ack_only.acknowledgment_number == 1003, "payload ACK number mismatch");
 }
 
@@ -366,8 +375,8 @@ void test_fin_generates_fin_ack_and_close_event() {
     require(mirage_tcp.handle_incoming_ip_packet(&fin_packet[0], fin_packet.size()) == mirage_tcp::ErrorCode::Ok, "FIN should be accepted");
     require(context.downstream_packets.size() == 2, "FIN should generate one FIN+ACK");
     mirage_tcp::TcpSegment fin_ack = parse_tcp_from_ip(context.downstream_packets[1]);
-    require(fin_ack.fin, "response to FIN should include FIN");
-    require(fin_ack.ack, "response to FIN should include ACK");
+    require(fin_ack.is_fin(), "response to FIN should include FIN");
+    require(fin_ack.is_ack(), "response to FIN should include ACK");
 
     std::vector<std::uint8_t> final_close_ack = build_client_packet(
         flow,
@@ -400,7 +409,7 @@ void test_invalid_flow_reports_error() {
     require(context.errors.empty(), "unknown flow should not emit error callback");
     require(context.downstream_packets.size() == 1, "unknown flow should generate one reset packet");
     mirage_tcp::TcpSegment reset = parse_tcp_from_ip(context.downstream_packets[0]);
-    require(reset.rst, "unknown flow response should be RST");
+    require(reset.is_rst(), "unknown flow response should be RST");
 }
 
 void test_null_packet_returns_invalid_argument_without_error_callback() {
@@ -490,7 +499,7 @@ void test_send_downstream_payload_generates_data_segment() {
         "send_downstream_tcp_payload should succeed");
     require(context.downstream_packets.size() == 2, "downstream payload should generate one packet");
     mirage_tcp::TcpSegment response = parse_tcp_from_ip(context.downstream_packets[1]);
-    require(response.ack, "downstream payload should carry ACK");
+    require(response.is_ack(), "downstream payload should carry ACK");
     require(response.payload == payload, "downstream payload content mismatch");
 
     std::vector<std::uint8_t> payload_ack = build_client_packet(
@@ -528,8 +537,8 @@ void test_close_flow_generates_fin_ack_and_close_event() {
     require(mirage_tcp.close_flow(flow) == mirage_tcp::ErrorCode::Ok, "close_flow should succeed");
     require(context.downstream_packets.size() == 2, "close_flow should generate one FIN+ACK");
     mirage_tcp::TcpSegment fin_ack = parse_tcp_from_ip(context.downstream_packets[1]);
-    require(fin_ack.fin, "close_flow response should include FIN");
-    require(fin_ack.ack, "close_flow response should include ACK");
+    require(fin_ack.is_fin(), "close_flow response should include FIN");
+    require(fin_ack.is_ack(), "close_flow response should include ACK");
 
     std::vector<std::uint8_t> close_ack = build_client_packet(
         flow,
@@ -577,7 +586,7 @@ void test_incoming_rst_clears_flow() {
     require(
         mirage_tcp::parse_tcp_segment(&rst_packet[rst_header_length], rst_packet.size() - rst_header_length, rst_segment) == mirage_tcp::ErrorCode::Ok,
         "tcp parse should succeed");
-    rst_segment.rst = true;
+    rst_segment.flags = TcpSegment::FlagsBuilder().set_rst().flags();
     const std::vector<std::uint8_t> rst_payload = mirage_tcp::serialize_tcp_segment(rst_segment);
     mirage_tcp::Ip4Head rst_head = *rst_ip;
     require(
@@ -611,7 +620,7 @@ void test_invalid_ack_resets_existing_flow() {
     require(context.reset_flows.size() == 1, "invalid final ACK should reset flow");
     require(context.downstream_packets.size() == 2, "invalid final ACK should generate reset packet");
     mirage_tcp::TcpSegment reset = parse_tcp_from_ip(context.downstream_packets[1]);
-    require(reset.rst, "invalid final ACK response should be RST");
+    require(reset.is_rst(), "invalid final ACK response should be RST");
 }
 
 }  // namespace

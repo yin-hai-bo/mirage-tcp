@@ -45,10 +45,7 @@ std::vector<uint8_t> serialize_tcp_segment_with_checksum(
     const ConnectionInfo& connection_info,
     uint32_t sequence_number,
     uint32_t acknowledgment_number,
-    bool syn_flag,
-    bool ack_flag,
-    bool fin_flag,
-    bool rst_flag,
+    uint8_t flags,
     const void* payload,
     size_t payload_size) {
     TcpSegment segment;
@@ -57,10 +54,7 @@ std::vector<uint8_t> serialize_tcp_segment_with_checksum(
     segment.sequence_number = sequence_number;
     segment.acknowledgment_number = acknowledgment_number;
     segment.window_size = 65535;
-    segment.syn = syn_flag;
-    segment.ack = ack_flag;
-    segment.fin = fin_flag;
-    segment.rst = rst_flag;
+    segment.flags = flags;
     if (payload != NULL && payload_size > 0) {
         const uint8_t* payload_bytes = static_cast<const uint8_t*>(payload);
         segment.payload.assign(payload_bytes, payload_bytes + static_cast<std::ptrdiff_t>(payload_size));
@@ -256,15 +250,12 @@ public:
             return ErrorCode::SendBeforeEstablished;
         }
 
-        Flow* flow = &it->second;
+        Flow* const flow = &it->second;
         const error_code_t emit_result = emit_tcp_response(
                 flow->connection_info,
                 flow->server_next_sequence,
                 flow->client_next_sequence,
-                false,
-                true,
-                false,
-                false,
+                TcpSegment::FlagsBuilder().set_ack().flags(),
                 payload,
                 payload_size);
         if (emit_result != ErrorCode::Ok) {
@@ -296,10 +287,7 @@ public:
                 flow->connection_info,
                 flow->server_next_sequence,
                 flow->client_next_sequence,
-                false,
-                true,
-                true,
-                false,
+                TcpSegment::FlagsBuilder().set_ack().set_fin().flags(),
                 NULL,
                 0);
         if (emit_result != ErrorCode::Ok) {
@@ -343,27 +331,25 @@ private:
         key.ip_ver = 4;
 
         FlowMap::iterator it = ipv4_flows_.find(key);
-        if (tcp_segment.syn && !tcp_segment.ack) {
+        if (tcp_segment.is_syn() && !tcp_segment.is_ack()) {
             return handle_syn(key, tcp_segment.sequence_number);
         }
 
         if (it == ipv4_flows_.end()) {
-            if (tcp_segment.rst) {
+            if (tcp_segment.is_rst()) {
                 return ErrorCode::Ok;
             }
             emit_reset_for_unhandled_packet(
                 key,
                 tcp_segment.sequence_number,
                 tcp_segment.acknowledgment_number,
-                tcp_segment.ack,
-                tcp_segment.syn,
-                tcp_segment.fin,
+                tcp_segment.flags,
                 tcp_segment.payload.size());
             return ErrorCode::FlowNotFound;
         }
 
         Flow* flow = &it->second;
-        if (tcp_segment.rst) {
+        if (tcp_segment.is_rst()) {
             const ConnectionInfo reset_flow = flow->connection_info;
             ipv4_flows_.erase(reset_flow);
             emit_reset(reset_flow);
@@ -371,7 +357,7 @@ private:
         }
 
         if (flow->state == FlowState::SynReceived) {
-            if (!tcp_segment.ack || tcp_segment.acknowledgment_number != flow->server_next_sequence) {
+            if (!tcp_segment.is_ack() || tcp_segment.acknowledgment_number != flow->server_next_sequence) {
                 return fail_flow(
                     flow->connection_info,
                     ErrorCode::HandshakeFinalAckExpected,
@@ -438,10 +424,7 @@ private:
                 connection_info,
                 flow.server_initial_sequence,
                 flow.client_next_sequence,
-                true,
-                true,
-                false,
-                false,
+                TcpSegment::FlagsBuilder().set_syn().set_ack().flags(),
                 NULL,
                 0);
         if (emit_result != ErrorCode::Ok) {
@@ -454,14 +437,14 @@ private:
     error_code_t handle_established_packet(
         Flow* flow,
         const TcpSegment& segment) {
-        if (segment.rst) {
+        if (segment.is_rst()) {
             const ConnectionInfo reset_flow = flow->connection_info;
             ipv4_flows_.erase(reset_flow);
             emit_reset(reset_flow);
             return ErrorCode::Ok;
         }
 
-        if (!segment.ack) {
+        if (!segment.is_ack()) {
             return fail_flow(
                 flow->connection_info,
                 ErrorCode::EstablishedAckRequired,
@@ -495,25 +478,19 @@ private:
                 flow->connection_info,
                 flow->server_next_sequence,
                 flow->client_next_sequence,
-                false,
-                true,
-                false,
-                false,
+                TcpSegment::FlagsBuilder().set_ack().flags(),
                 NULL,
                 0);
         }
 
-        if (segment.fin) {
+        if (segment.is_fin()) {
             flow->client_next_sequence += 1;
             flow->state = FlowState::LastAck;
             const error_code_t emit_result = emit_tcp_response(
                     flow->connection_info,
                     flow->server_next_sequence,
                     flow->client_next_sequence,
-                    false,
-                    true,
-                    true,
-                    false,
+                    TcpSegment::FlagsBuilder().set_ack().set_fin().flags(),
                     NULL,
                     0);
             if (emit_result != ErrorCode::Ok) {
@@ -529,7 +506,7 @@ private:
     error_code_t handle_last_ack_packet(
         Flow* flow,
         const TcpSegment& segment) {
-        if (!segment.ack) {
+        if (!segment.is_ack()) {
             return fail_flow(
                 flow->connection_info,
                 ErrorCode::CloseFinalAckExpected,
@@ -555,38 +532,30 @@ private:
         const ConnectionInfo& connection_info,
         uint32_t sequence_number,
         uint32_t acknowledgment_number,
-        bool ack_flag,
-        bool syn_flag,
-        bool fin_flag,
+        uint8_t flags,
         size_t payload_size) {
-        if (ack_flag) {
+        if (flags & TcpSegment::BITS_MASK_ACK) {
             return emit_tcp_response(
                 connection_info,
                 acknowledgment_number,
                 0,
-                false,
-                false,
-                false,
-                true,
+                TcpSegment::FlagsBuilder().set_rst().flags(),
                 NULL,
                 0);
         }
 
         uint32_t ack_number = sequence_number + static_cast<uint32_t>(payload_size);
-        if (syn_flag) {
+        if (flags & TcpSegment::BITS_MASK_SYN) {
             ++ack_number;
         }
-        if (fin_flag) {
+        if (flags & TcpSegment::BITS_MASK_FIN) {
             ++ack_number;
         }
         return emit_tcp_response(
             connection_info,
             0,
             ack_number,
-            false,
-            true,
-            false,
-            true,
+            TcpSegment::FlagsBuilder().set_ack().set_rst().flags(),
             NULL,
             0);
     }
@@ -600,9 +569,7 @@ private:
             connection_info,
             segment.sequence_number,
             segment.acknowledgment_number,
-            segment.ack,
-            segment.syn,
-            segment.fin,
+            segment.flags,
             segment.payload.size());
         emit_reset(connection_info);
         return error_code;
@@ -612,20 +579,14 @@ private:
         const ConnectionInfo& connection_info,
         uint32_t sequence_number,
         uint32_t acknowledgment_number,
-        bool syn_flag,
-        bool ack_flag,
-        bool fin_flag,
-        bool rst_flag,
+        uint8_t flags,
         const void* payload,
         size_t payload_size) {
         const std::vector<uint8_t> tcp_bytes = serialize_tcp_segment_with_checksum(
             connection_info,
             sequence_number,
             acknowledgment_number,
-            syn_flag,
-            ack_flag,
-            fin_flag,
-            rst_flag,
+            flags,
             payload,
             payload_size);
 

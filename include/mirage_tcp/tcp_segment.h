@@ -22,24 +22,51 @@ using std::uint32_t;
 struct TcpSegment {
     /** @brief Source TCP port. */
     uint16_t source_port;
+
     /** @brief Destination TCP port. */
     uint16_t destination_port;
+
     /** @brief TCP sequence number. */
     uint32_t sequence_number;
+
     /** @brief TCP acknowledgment number. */
     uint32_t acknowledgment_number;
+
     /** @brief Advertised TCP receive window. */
     uint16_t window_size;
-    /** @brief SYN flag. */
-    bool syn;
-    /** @brief ACK flag. */
-    bool ack;
-    /** @brief FIN flag. */
-    bool fin;
-    /** @brief RST flag. */
-    bool rst;
+
     /** @brief TCP payload bytes after the fixed header. */
     std::vector<uint8_t> payload;
+
+    uint8_t flags;
+
+    /** @brief SYN flag. */
+    bool is_syn() const { return flags & BITS_MASK_SYN; }
+
+    /** @brief ACK flag. */
+    bool is_ack() const { return flags & BITS_MASK_ACK; }
+
+    /** @brief FIN flag. */
+    bool is_fin() const { return flags & BITS_MASK_FIN; }
+
+    /** @brief RST flag. */
+    bool is_rst() const { return flags & BITS_MASK_RST; };
+
+    static constexpr unsigned BITS_MASK_FIN = 0x01u;
+    static constexpr unsigned BITS_MASK_SYN = 0x02u;
+    static constexpr unsigned BITS_MASK_RST = 0x04u;
+    static constexpr unsigned BITS_MASK_ACK = 0x10u;
+
+    class FlagsBuilder {
+        unsigned flags_ = 0;
+    public:
+        FlagsBuilder & set_syn() { flags_ |= BITS_MASK_SYN; return *this; }
+        FlagsBuilder & set_ack() { flags_ |= BITS_MASK_ACK; return *this; }
+        FlagsBuilder & set_fin() { flags_ |= BITS_MASK_FIN; return *this; }
+        FlagsBuilder & set_rst() { flags_ |= BITS_MASK_RST; return *this; }
+
+        uint8_t flags() const { return static_cast<uint8_t>(flags_); }
+    };
 
     TcpSegment();
 };

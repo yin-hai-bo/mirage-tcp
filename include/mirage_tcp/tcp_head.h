@@ -1,6 +1,7 @@
 #ifndef MIRAGE_TCP_TCP_HEAD_H
 #define MIRAGE_TCP_TCP_HEAD_H
 
+#include <cstddef>
 #include <cstdint>
 
 namespace mirage_tcp {
@@ -22,6 +23,10 @@ struct TcpHead {
     uint16_t window_size;
     uint16_t checksum;
     uint16_t urgent_pointer;
+
+    size_t head_size() const {
+        return (this->data_offset_reserved >> 4) * sizeof(uint32_t);
+    }
 };
 
 static_assert(sizeof(TcpHead) == 20, "TcpHead must match the fixed TCP header size");
