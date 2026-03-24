@@ -2,7 +2,7 @@
 #include <cstdint>
 #include <vector>
 
-#include "mirage_tcp/checksum.h"
+#include "checksum.h"
 #include "test_harness.h"
 
 namespace {

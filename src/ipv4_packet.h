@@ -12,9 +12,8 @@
 #include <netinet/in.h>
 #endif
 
-#include "mirage_tcp/types.h"
 #include "mirage_tcp/error_code.h"
-#include "mirage_tcp/ip4_head.h"
+#include "ip4_head.h"
 
 namespace mirage_tcp {
 
@@ -50,6 +49,20 @@ struct Ip4PacketView {
         this->payload_size = payload_size;
     }
 };
+
+/**
+ * @brief Parses one inbound IPv4/TCP packet into a non-owning view.
+ *
+ * @param packet Pointer to the raw IP packet bytes to validate as IPv4/TCP.
+ *               The caller must guarantee that @p packet is not NULL.
+ * @param packet_size Size of @p packet in bytes.
+ * @param parsed_packet Output packet view on success.
+ * @return 0 if parsing succeeds as IPv4/TCP; otherwise an error code.
+ */
+error_code_t parse_ipv4_tcp_packet(
+    const void* packet,
+    size_t packet_size,
+    Ip4PacketView& parsed_packet);
 
 /**
  * @brief Serializes an IPv4 packet and computes its header checksum.

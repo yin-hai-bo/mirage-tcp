@@ -1,9 +1,9 @@
-#include "mirage_tcp/checksum.h"
+#include "checksum.h"
 #include "mirage_tcp/mirage_tcp.h"
-#include "mirage_tcp/ipv4_packet.h"
-#include "mirage_tcp/tcp_head.h"
-#include "mirage_tcp/tcp_segment.h"
-#include "ipv4_packet_internal.h"
+#include "ip6_head.h"
+#include "ipv4_packet.h"
+#include "tcp_head.h"
+#include "tcp_segment.h"
 #include "packet_buffer_pool.h"
 
 #include <cassert>

@@ -46,8 +46,7 @@
 - 对外和热路径上的“成功/失败”接口统一使用 `int error code`，`0` 表示成功；不要用 `bool` 表示是否成功。
 - 不要为错误返回设计 `std::string` 或 message out 参数；调用方应基于错误码枚举处理。
 - 所有公共错误码集中定义在一个位置；不要再按模块分散声明多组错误码枚举。
-- `MirageTcpCallbacks::on_error` 只传 `int error_code`。
-- `TcpConnection::ConnectionEvent` 只使用 `event_code` 表达错误或关闭原因，不携带 message 字符串。
+- `error_code_t` 的底层类型保持为 `int`，并集中在 `include/mirage_tcp/error_code.h` 定义。
 
 ## 协议约束
 
@@ -71,4 +70,6 @@
 
 - 保持 `README.md` 与实际支持行为一致。
 - 记录每一个会影响集成预期、且被有意不支持的 TCP/IP 行为。
+- 保持文档对头文件边界的描述与当前结构一致：
+  `include/mirage_tcp/` 只放 public API，`src/` 放内部实现头和实现文件。
 

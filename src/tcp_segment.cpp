@@ -1,5 +1,5 @@
-#include "mirage_tcp/tcp_segment.h"
-#include "mirage_tcp/tcp_head.h"
+#include "tcp_segment.h"
+#include "tcp_head.h"
 
 #include <cassert>
 #include <cstring>
@@ -110,4 +110,3 @@ std::vector<uint8_t> serialize_tcp_segment(const TcpSegment& segment) {
 }
 
 }  // namespace mirage_tcp
-

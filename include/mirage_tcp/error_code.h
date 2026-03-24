@@ -3,6 +3,8 @@
 
 namespace mirage_tcp {
 
+using error_code_t = int;
+
 struct ErrorCode {
     enum Value {
         Ok = 0,

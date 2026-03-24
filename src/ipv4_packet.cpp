@@ -1,4 +1,4 @@
-#include "mirage_tcp/ipv4_packet.h"
+#include "ipv4_packet.h"
 
 #include <cassert>
 #include <cstring>

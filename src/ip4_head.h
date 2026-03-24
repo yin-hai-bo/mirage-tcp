@@ -4,7 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 
-#include "mirage_tcp/constants.h"
+#include "constants.h"
 
 namespace mirage_tcp {
 

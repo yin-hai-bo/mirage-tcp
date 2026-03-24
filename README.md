@@ -11,6 +11,9 @@
 
 ## 当前 API 约定
 
+- 当前 public 头文件只有：
+  `mirage_tcp/mirage_tcp.h`
+  `mirage_tcp/error_code.h`
 - 对外连接标识统一使用 `ConnectionInfo`。
 - `ConnectionInfo` 同时承载 `IPv4` 和 `IPv6` 地址：
   `client_ip` / `server_ip` 使用内部 `Address union` 保存 `in_addr` 或 `in6_addr`，
@@ -20,8 +23,9 @@
 
 ## 错误处理约定
 
-- `mirage_tcp/mirage_tcp.h` 只保证导出 `error_code_t`，用于接收或转发返回值。
-- 若调用方需要判断具体错误码，请额外包含 `mirage_tcp/error_code.h`。
+- 一般情况下只包含 `mirage_tcp/mirage_tcp.h` 即可，它会连带包含 `mirage_tcp/error_code.h`。
+- `error_code_t` 用于接收或转发返回值，底层类型为 `int`。
+- 如果调用方只想单独使用错误码定义，也可以只包含 `mirage_tcp/error_code.h`。
 - `ErrorCode::Ok` 表示成功。
 - 失败时，调用方应按统一的 `ErrorCode` 枚举处理，而不是依赖字符串匹配。
 - 所有公共错误码统一定义在 `include/mirage_tcp/error_code.h`。

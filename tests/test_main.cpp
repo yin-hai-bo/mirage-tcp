@@ -6,9 +6,9 @@
 #include <unordered_map>
 #include <vector>
 
-#include "mirage_tcp/ipv4_packet.h"
+#include "ipv4_packet.h"
 #include "mirage_tcp/mirage_tcp.h"
-#include "mirage_tcp/tcp_segment.h"
+#include "tcp_segment.h"
 #include "test_harness.h"
 
 void append_checksum_tests(std::vector<TestCase>* tests);

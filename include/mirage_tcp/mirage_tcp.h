@@ -12,13 +12,11 @@
 #include <netinet/in.h>
 #endif
 
-#include "mirage_tcp/ip6_head.h"
-#include "mirage_tcp/types.h"
+#include "mirage_tcp/error_code.h"
 
 namespace mirage_tcp {
 
 using std::size_t;
-using std::uint8_t;
 using std::uint16_t;
 using ::in_addr;
 using ::in6_addr;
@@ -134,7 +132,7 @@ public:
      * @brief Accepts one inbound IP packet from the host.
      *
      * @param ip_packet Pointer to raw IP packet bytes. The caller guarantees
-     *        that @p ip_packet is not null and is aligned to alignof(Ip6Head).
+     *        that @p ip_packet is not null and is suitably aligned for fixed IP header access.
      * @param ip_packet_size Size of @p ip_packet in bytes.
      * @return 0 if the packet is accepted; otherwise an error code.
      */

@@ -17,6 +17,8 @@ add_library(mirage_tcp STATIC
 target_include_directories(mirage_tcp
     PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/include
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 
 if(WIN32)
@@ -33,6 +35,7 @@ add_executable(mirage_tcp_tests
     tests/test_main.cpp
 )
 target_link_libraries(mirage_tcp_tests PRIVATE mirage_tcp)
+target_include_directories(mirage_tcp_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 
 enable_testing()
 add_test(NAME mirage_tcp_tests COMMAND mirage_tcp_tests)

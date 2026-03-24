@@ -6,7 +6,6 @@
 
 #include <vector>
 
-#include "mirage_tcp/types.h"
 #include "mirage_tcp/error_code.h"
 
 namespace mirage_tcp {
