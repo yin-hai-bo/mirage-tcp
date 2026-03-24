@@ -408,8 +408,9 @@ private:
             }
 
             flow->state = FlowState::Established;
-            if (callbacks_.on_tcp_handshake_completed != NULL) {
-                callbacks_.on_tcp_handshake_completed(callbacks_.user_data, flow->connection_info);
+            const auto cb = callbacks_.on_tcp_handshake_completed;
+            if (cb) {
+                cb(callbacks_.user_data, flow->connection_info);
             }
             return ErrorCode::Ok;
         }
@@ -424,14 +425,16 @@ private:
     }
 
     void emit_downstream_ip_packet(const void* ip_packet, size_t ip_packet_size) const {
-        if (callbacks_.on_downstream_ip_packet_generated != NULL) {
-            callbacks_.on_downstream_ip_packet_generated(callbacks_.user_data, ip_packet, ip_packet_size);
+        const auto cb = callbacks_.on_downstream_ip_packet_generated;
+        if (cb) {
+            cb(callbacks_.user_data, ip_packet, ip_packet_size);
         }
     }
 
     void emit_reset(const ConnectionInfo& connection_info) const {
-        if (callbacks_.on_tcp_connection_reset != NULL) {
-            callbacks_.on_tcp_connection_reset(callbacks_.user_data, connection_info);
+        const auto cb = callbacks_.on_tcp_connection_reset;
+        if (cb) {
+            cb(callbacks_.user_data, connection_info);
         }
     }
 
@@ -499,8 +502,9 @@ private:
 
         if (!segment.payload.empty()) {
             flow->client_next_sequence += static_cast<uint32_t>(segment.payload.size());
-            if (callbacks_.on_tcp_payload_received != NULL) {
-                callbacks_.on_tcp_payload_received(
+            const auto cb = callbacks_.on_tcp_payload_received;
+            if (cb) {
+                cb(
                     callbacks_.user_data,
                     flow->connection_info,
                     &segment.payload[0],
@@ -550,8 +554,9 @@ private:
 
         const ConnectionInfo completed_flow = flow->connection_info;
         ipv4_flows_.erase(completed_flow);
-        if (callbacks_.on_tcp_connection_closed != NULL) {
-            callbacks_.on_tcp_connection_closed(callbacks_.user_data, completed_flow);
+        const auto cb = callbacks_.on_tcp_connection_closed;
+        if (cb) {
+            cb(callbacks_.user_data, completed_flow);
         }
         return ErrorCode::Ok;
     }
