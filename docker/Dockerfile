@@ -7,12 +7,14 @@ RUN apt-get update \
         build-essential \
         ca-certificates \
         cmake \
+        curl \
         gdb \
         iproute2 \
         iptables \
         iputils-ping \
         make \
         netcat-openbsd \
+        net-tools \
         tcpdump \
     && rm -rf /var/lib/apt/lists/*
 

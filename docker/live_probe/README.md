@@ -14,7 +14,19 @@
 
 ## 容器内最小用法
 
-先构建：
+先在宿主机构建 Docker 镜像：
+
+```bash
+docker build -t mirage-tcp-dev -f docker/Dockerfile .
+```
+
+然后启动开发容器：
+
+```bat
+docker\run-container.bat
+```
+
+进入容器后再构建 probe：
 
 ```bash
 cmake -S . -B build
@@ -38,6 +50,38 @@ cmake --build build --target mirage_tcp_live_probe
 ```bash
 curl --max-time 3 http://10.200.0.2/
 ```
+
+## 如何边跑 probe 边测
+
+方式一：在同一个容器 shell 里把 probe 放到后台。
+
+```bash
+./build/mirage_tcp_live_probe &
+curl --max-time 3 http://10.200.0.2/
+```
+
+常用控制命令：
+
+- `jobs`
+- `fg %1`
+- `kill %1`
+
+方式二：保留 probe 占用当前 shell，再从宿主机开第二个 shell 进入同一个容器。
+
+先在第一个 shell 里启动：
+
+```bash
+./build/mirage_tcp_live_probe
+```
+
+然后在宿主机另一个终端里执行：
+
+```bash
+docker exec -it mirage-tcp-dev bash
+curl --max-time 3 http://10.200.0.2/
+```
+
+注意：`curl` 需要在运行 probe 的同一个容器里执行，因为测试路由和 `TUN` 设备都在该容器自己的 network namespace 中。
 
 如果需要自定义：
 

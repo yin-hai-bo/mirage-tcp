@@ -16,10 +16,13 @@
 #include <unistd.h>
 #include <sys/ioctl.h>
 #include <sys/wait.h>
+#include <poll.h>
 #include <linux/if.h>
 #include <linux/if_tun.h>
 
 namespace {
+
+const int TUN_POLL_TIMEOUT_MS = 200;
 
 volatile sig_atomic_t g_should_stop = 0;
 
@@ -158,6 +161,23 @@ public:
     void run() {
         std::cout << "MirageTCP live probe is running on TUN device." << std::endl;
         while (!g_should_stop) {
+            pollfd tun_poll_fd;
+            std::memset(&tun_poll_fd, 0, sizeof(tun_poll_fd));
+            tun_poll_fd.fd = tun_fd_;
+            tun_poll_fd.events = POLLIN;
+
+            const int poll_result = poll(&tun_poll_fd, 1, TUN_POLL_TIMEOUT_MS);
+            if (poll_result < 0) {
+                if (errno == EINTR) {
+                    continue;
+                }
+                throw std::runtime_error(std::string("poll(TUN) failed: ") + std::strerror(errno));
+            }
+
+            if (poll_result == 0) {
+                continue;
+            }
+
             const ssize_t read_size = read(tun_fd_, packet_buffer_, sizeof(packet_buffer_));
             if (read_size < 0) {
                 if (errno == EINTR) {
@@ -267,5 +287,6 @@ int main() {
     }
 
     close(tun_fd);
+    std::cout << "MirageTCP live probe stopped." << std::endl;
     return 0;
 }
