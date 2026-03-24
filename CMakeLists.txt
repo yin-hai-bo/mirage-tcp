@@ -31,6 +31,13 @@ add_executable(mirage_tcp_example
 )
 target_link_libraries(mirage_tcp_example PRIVATE mirage_tcp)
 
+if(UNIX AND NOT WIN32)
+    add_executable(mirage_tcp_live_probe
+        docker/live_probe/main.cpp
+    )
+    target_link_libraries(mirage_tcp_live_probe PRIVATE mirage_tcp)
+endif()
+
 add_executable(mirage_tcp_tests
     tests/test_checksum.cpp
     tests/test_main.cpp

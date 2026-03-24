@@ -66,6 +66,12 @@ cmake --build build
 ctest --test-dir build --output-on-failure
 ```
 
+## Docker 实测
+
+- Docker 开发镜像定义在 [`docker/Dockerfile`](C:/dev/MirageTCP/docker/Dockerfile)。
+- 基于 `TUN` 的实测程序位于 [`docker/live_probe/README.md`](C:/dev/MirageTCP/docker/live_probe/README.md)。
+- 该程序在容器内拦截发往测试地址的系统 `IPv4/TCP` 流量，并把抓到的完整 `IP packet` 直接交给 `MirageTcp` 本地终结。
+
 ## 设计文档
 
 - 依赖关系图见 [`docs/dependency-graph.md`](C:/dev/MirageTCP/docs/dependency-graph.md)
@@ -109,4 +115,3 @@ if (result == mirage_tcp::ErrorCode::FlowNotFound) {
 ```
 
 完整示例见 `examples/basic_client.cpp`。
-
