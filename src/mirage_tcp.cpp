@@ -377,10 +377,7 @@ private:
             }
             emit_reset_for_unhandled_packet(
                 key,
-                tcp_segment.sequence_number,
-                tcp_segment.acknowledgment_number,
-                tcp_segment.flags,
-                tcp_segment.payload.size());
+                tcp_segment);
             return ErrorCode::FlowNotFound;
         }
 
@@ -563,23 +560,21 @@ private:
 
     error_code_t emit_reset_for_unhandled_packet(
         const ConnectionInfo& connection_info,
-        uint32_t sequence_number,
-        uint32_t acknowledgment_number,
-        uint8_t flags,
-        size_t payload_size) {
-        if (flags & TcpSegment::BITS_MASK_ACK) {
+        const TcpSegment& segment) {
+        if (segment.flags & TcpSegment::BITS_MASK_ACK) {
             return emit_tcp_response(
                 connection_info,
-                acknowledgment_number,
+                segment.acknowledgment_number,
                 0,
                 TcpSegment::FlagsBuilder().set_rst().flags());
         }
 
-        uint32_t ack_number = sequence_number + static_cast<uint32_t>(payload_size);
-        if (flags & TcpSegment::BITS_MASK_SYN) {
+        uint32_t ack_number =
+            segment.sequence_number + static_cast<uint32_t>(segment.payload.size());
+        if (segment.flags & TcpSegment::BITS_MASK_SYN) {
             ++ack_number;
         }
-        if (flags & TcpSegment::BITS_MASK_FIN) {
+        if (segment.flags & TcpSegment::BITS_MASK_FIN) {
             ++ack_number;
         }
         return emit_tcp_response(
@@ -596,10 +591,7 @@ private:
         ipv4_flows_.erase(connection_info);
         emit_reset_for_unhandled_packet(
             connection_info,
-            segment.sequence_number,
-            segment.acknowledgment_number,
-            segment.flags,
-            segment.payload.size());
+            segment);
         emit_reset(connection_info);
         return error_code;
     }
