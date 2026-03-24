@@ -2,6 +2,7 @@
 #define MIRAGE_TCP_IP6_HEAD_H
 
 #include <cstdint>
+#include <type_traits>
 
 namespace mirage_tcp {
 
@@ -24,6 +25,8 @@ struct Ip6Head {
 };
 
 static_assert(sizeof(Ip6Head) == 40, "Ip6Head must match the fixed IPv6 header size");
+static_assert(std::is_standard_layout<Ip6Head>::value, "Ip6Head must be standard-layout");
+static_assert(std::is_trivially_copyable<Ip6Head>::value, "Ip6Head must be trivially copyable");
 
 }  // namespace mirage_tcp
 

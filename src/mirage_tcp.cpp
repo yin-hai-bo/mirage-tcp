@@ -8,6 +8,7 @@
 
 #include <cassert>
 #include <cstring>
+#include <type_traits>
 #include <unordered_map>
 namespace mirage_tcp {
 
@@ -30,12 +31,34 @@ void write_u16_be(uint16_t value, uint8_t* bytes) {
     bytes[1] = static_cast<uint8_t>(value & 0xff);
 }
 
-void write_u32_be(uint32_t value, uint8_t* bytes) {
-    bytes[0] = static_cast<uint8_t>((value >> 24) & 0xff);
-    bytes[1] = static_cast<uint8_t>((value >> 16) & 0xff);
-    bytes[2] = static_cast<uint8_t>((value >> 8) & 0xff);
-    bytes[3] = static_cast<uint8_t>(value & 0xff);
-}
+struct TcpIpv4PseudoHeader {
+    uint32_t source_address;
+    uint32_t destination_address;
+    uint8_t zero;
+    uint8_t protocol;
+    uint16_t tcp_length;
+
+    /**
+     * @brief Builds one IPv4 TCP pseudo-header in network byte order.
+     *
+     * @param source_address_value Source IPv4 address.
+     * @param destination_address_value Destination IPv4 address.
+     * @param tcp_length_host_order TCP segment length in host byte order.
+     */
+    TcpIpv4PseudoHeader(
+        const in_addr& source_address_value,
+        const in_addr& destination_address_value,
+        uint16_t tcp_length_host_order)
+        : source_address(source_address_value.s_addr),
+          destination_address(destination_address_value.s_addr),
+          zero(0),
+          protocol(IP_PROTOCOL_TCP),
+          tcp_length(htons(tcp_length_host_order)) {}
+};
+
+static_assert(sizeof(TcpIpv4PseudoHeader) == 12, "TcpIpv4PseudoHeader must match the IPv4 TCP pseudo-header size");
+static_assert(std::is_standard_layout<TcpIpv4PseudoHeader>::value, "TcpIpv4PseudoHeader must be standard-layout");
+static_assert(std::is_trivially_copyable<TcpIpv4PseudoHeader>::value, "TcpIpv4PseudoHeader must be trivially copyable");
 
 size_t serialized_tcp_segment_size(size_t payload_size) {
     return sizeof(TcpHead) + payload_size;
@@ -48,32 +71,33 @@ void serialize_tcp_segment_with_checksum(
     uint8_t flags,
     const void* payload,
     size_t payload_size,
-    uint8_t* bytes)
+    uint8_t* target)
 {
     const size_t tcp_size = serialized_tcp_segment_size(payload_size);
-    std::memset(bytes, 0, tcp_size);
-    write_u16_be(connection_info.server_port, bytes + offsetof(TcpHead, source_port));
-    write_u16_be(connection_info.client_port, bytes + offsetof(TcpHead, destination_port));
-    write_u32_be(sequence_number, bytes + offsetof(TcpHead, sequence_number));
-    write_u32_be(acknowledgment_number, bytes + offsetof(TcpHead, acknowledgment_number));
-    bytes[offsetof(TcpHead, data_offset_reserved)] = static_cast<uint8_t>(5U << 4);
-    bytes[offsetof(TcpHead, flags)] = flags;
-    write_u16_be(65535, bytes + offsetof(TcpHead, window_size));
+    TcpHead head = {};
+    head.source_port = htons(connection_info.server_port);
+    head.destination_port = htons(connection_info.client_port);
+    head.sequence_number = htonl(sequence_number);
+    head.acknowledgment_number = htonl(acknowledgment_number);
+    head.data_offset_reserved = static_cast<uint8_t>(5U << 4);
+    head.flags = flags;
+    head.window_size = htons(65535);
+    head.checksum = 0;
+    head.urgent_pointer = 0;
+    std::memcpy(target, &head, sizeof(head));
 
-    if (payload != NULL && payload_size > 0) {
-        const uint8_t* payload_bytes = static_cast<const uint8_t*>(payload);
-        std::memcpy(bytes + sizeof(TcpHead), payload_bytes, payload_size);
+    if (payload && payload_size > 0) {
+        std::memcpy(target + sizeof(TcpHead), payload, payload_size);
     }
 
-    uint8_t pseudo_header[12] = {};
-    std::memcpy(&pseudo_header[0], &connection_info.server_ip.ipv4, 4);
-    std::memcpy(&pseudo_header[4], &connection_info.client_ip.ipv4, 4);
-    pseudo_header[9] = IP_PROTOCOL_TCP;
-    write_u16_be(static_cast<uint16_t>(tcp_size), &pseudo_header[10]);
+    const TcpIpv4PseudoHeader pseudo_header(
+        connection_info.server_ip.ipv4,
+        connection_info.client_ip.ipv4,
+        static_cast<uint16_t>(tcp_size));
 
-    const uint16_t pseudo_header_sum = Checksum::Calculate(&pseudo_header[0], sizeof(pseudo_header));
-    const uint16_t checksum = static_cast<uint16_t>(~Checksum::Calculate(bytes, tcp_size, pseudo_header_sum));
-    write_u16_be(checksum, bytes + offsetof(TcpHead, checksum));
+    const uint16_t pseudo_header_sum = Checksum::Calculate(&pseudo_header, sizeof(pseudo_header));
+    const uint16_t checksum = static_cast<uint16_t>(~Checksum::Calculate(target, tcp_size, pseudo_header_sum));
+    write_u16_be(checksum, target + offsetof(TcpHead, checksum));
 }
 
 error_code_t parse_ipv6_tcp_packet(const void* packet, size_t packet_size) {

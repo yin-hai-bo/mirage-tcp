@@ -3,6 +3,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <type_traits>
 
 #include "constants.h"
 
@@ -43,6 +44,8 @@ struct Ip4Head {
 };
 
 static_assert(sizeof(Ip4Head) == 20, "Ip4Head must match the fixed IPv4 header size");
+static_assert(std::is_standard_layout<Ip4Head>::value, "Ip4Head must be standard-layout");
+static_assert(std::is_trivially_copyable<Ip4Head>::value, "Ip4Head must be trivially copyable");
 
 }  // namespace mirage_tcp
 

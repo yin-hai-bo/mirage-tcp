@@ -3,6 +3,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <type_traits>
 
 namespace mirage_tcp {
 
@@ -30,6 +31,8 @@ struct TcpHead {
 };
 
 static_assert(sizeof(TcpHead) == 20, "TcpHead must match the fixed TCP header size");
+static_assert(std::is_standard_layout<TcpHead>::value, "TcpHead must be standard-layout");
+static_assert(std::is_trivially_copyable<TcpHead>::value, "TcpHead must be trivially copyable");
 
 }  // namespace mirage_tcp
 

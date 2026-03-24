@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <type_traits>
 
 #if defined(_WIN32)
 #include <winsock2.h>
@@ -53,6 +54,11 @@ struct ConnectionInfo {
         uint16_t client_port,
         uint16_t server_port);
 };
+
+static_assert(std::is_standard_layout<ConnectionInfo::Address>::value, "ConnectionInfo::Address must be standard-layout");
+static_assert(std::is_trivially_copyable<ConnectionInfo::Address>::value, "ConnectionInfo::Address must be trivially copyable");
+static_assert(std::is_standard_layout<ConnectionInfo>::value, "ConnectionInfo must be standard-layout");
+static_assert(std::is_trivially_copyable<ConnectionInfo>::value, "ConnectionInfo must be trivially copyable");
 
 /**
  * @brief Strict weak ordering for using ConnectionInfo as a map key.
@@ -109,6 +115,9 @@ struct MirageTcpCallbacks {
 
     MirageTcpCallbacks();
 };
+
+static_assert(std::is_standard_layout<MirageTcpCallbacks>::value, "MirageTcpCallbacks must be standard-layout");
+static_assert(std::is_trivially_copyable<MirageTcpCallbacks>::value, "MirageTcpCallbacks must be trivially copyable");
 
 /**
  * @brief Host-driven local TCP terminator for intercepted IPv4/TCP traffic.
