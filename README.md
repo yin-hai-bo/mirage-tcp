@@ -12,6 +12,7 @@
 ## 当前 API 约定
 
 - 当前 public 头文件只有：
+  `mirage_tcp/connection_info.h`
   `mirage_tcp/mirage_tcp.h`
   `mirage_tcp/error_code.h`
 - 对外连接标识统一使用 `ConnectionInfo`。

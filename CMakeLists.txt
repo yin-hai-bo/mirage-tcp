@@ -8,6 +8,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 add_library(mirage_tcp STATIC
     src/checksum.cpp
+    src/connection_info.cpp
     src/ipv4_packet.cpp
     src/mirage_tcp.cpp
     src/packet_buffer_pool.cpp

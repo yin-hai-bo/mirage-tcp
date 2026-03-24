@@ -20,12 +20,14 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\..\src\checksum.cpp" />
+    <ClCompile Include="..\..\src\connection_info.cpp" />
     <ClCompile Include="..\..\src\ipv4_packet.cpp" />
     <ClCompile Include="..\..\src\mirage_tcp.cpp" />
     <ClCompile Include="..\..\src\packet_buffer_pool.cpp" />
     <ClCompile Include="..\..\src\tcp_segment.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="..\..\include\mirage_tcp\connection_info.h" />
     <ClInclude Include="..\..\include\mirage_tcp\error_code.h" />
     <ClInclude Include="..\..\include\mirage_tcp\mirage_tcp.h" />
     <ClInclude Include="..\..\src\checksum.h" />
