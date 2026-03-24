@@ -41,14 +41,6 @@ size_t serialized_tcp_segment_size(size_t payload_size) {
     return sizeof(TcpHead) + payload_size;
 }
 
-void write_ipv4_header(const Ip4Head& head, size_t total_size, uint8_t* bytes) {
-    std::memcpy(bytes, &head, sizeof(head));
-    write_u16_be(static_cast<uint16_t>(total_size), bytes + 2);
-    write_u16_be(0, bytes + 10);
-    const uint16_t checksum = static_cast<uint16_t>(~Checksum::Calculate(bytes, sizeof(Ip4Head)));
-    write_u16_be(checksum, bytes + 10);
-}
-
 void serialize_tcp_segment_with_checksum(
     const ConnectionInfo& connection_info,
     uint32_t sequence_number,
@@ -301,9 +293,7 @@ public:
                 flow->connection_info,
                 flow->server_next_sequence,
                 flow->client_next_sequence,
-                TcpSegment::FlagsBuilder().set_ack().set_fin().flags(),
-                NULL,
-                0);
+                TcpSegment::FlagsBuilder().set_ack().set_fin().flags());
         if (emit_result != ErrorCode::Ok) {
             return emit_result;
         }
@@ -321,7 +311,7 @@ private:
     };
 
     struct Flow {
-        ConnectionInfo connection_info;
+        const ConnectionInfo connection_info;
         FlowState state;
         uint32_t client_next_sequence;
         uint32_t server_next_sequence;
@@ -351,6 +341,7 @@ private:
             ipv4_packet.destination_address,
             tcp_segment.source_port,
             tcp_segment.destination_port);
+
         if (tcp_segment.is_syn() && !tcp_segment.is_ack()) {
             return handle_syn(key, tcp_segment.sequence_number);
         }
@@ -442,13 +433,12 @@ private:
                 connection_info,
                 server_sequence_for_syn_ack,
                 client_next_sequence,
-                TcpSegment::FlagsBuilder().set_syn().set_ack().flags(),
-                NULL,
-                0);
+                TcpSegment::FlagsBuilder().set_syn().set_ack().flags());
         if (emit_result != ErrorCode::Ok) {
             ipv4_flows_.erase(connection_info);
             return emit_result;
         }
+
         return ErrorCode::Ok;
     }
 
@@ -496,9 +486,7 @@ private:
                 flow->connection_info,
                 flow->server_next_sequence,
                 flow->client_next_sequence,
-                TcpSegment::FlagsBuilder().set_ack().flags(),
-                NULL,
-                0);
+                TcpSegment::FlagsBuilder().set_ack().flags());
         }
 
         if (segment.is_fin()) {
@@ -508,9 +496,7 @@ private:
                     flow->connection_info,
                     flow->server_next_sequence,
                     flow->client_next_sequence,
-                    TcpSegment::FlagsBuilder().set_ack().set_fin().flags(),
-                    NULL,
-                    0);
+                    TcpSegment::FlagsBuilder().set_ack().set_fin().flags());
             if (emit_result != ErrorCode::Ok) {
                 return emit_result;
             }
@@ -557,9 +543,7 @@ private:
                 connection_info,
                 acknowledgment_number,
                 0,
-                TcpSegment::FlagsBuilder().set_rst().flags(),
-                NULL,
-                0);
+                TcpSegment::FlagsBuilder().set_rst().flags());
         }
 
         uint32_t ack_number = sequence_number + static_cast<uint32_t>(payload_size);
@@ -573,9 +557,7 @@ private:
             connection_info,
             0,
             ack_number,
-            TcpSegment::FlagsBuilder().set_ack().set_rst().flags(),
-            NULL,
-            0);
+            TcpSegment::FlagsBuilder().set_ack().set_rst().flags());
     }
 
     error_code_t fail_flow(
@@ -594,12 +576,22 @@ private:
     }
 
     error_code_t emit_tcp_response(
+        const ConnectionInfo & connection_info,
+        uint32_t sequence_number,
+        uint32_t acknowledgment_number,
+        uint8_t flags)
+    {
+        return emit_tcp_response(connection_info, sequence_number, acknowledgment_number, flags, nullptr, 0);
+    }
+
+    error_code_t emit_tcp_response(
         const ConnectionInfo& connection_info,
         uint32_t sequence_number,
         uint32_t acknowledgment_number,
         uint8_t flags,
         const void* payload,
-        size_t payload_size) {
+        size_t payload_size
+    ) {
         const size_t ipv4_header_size = sizeof(Ip4Head);
         const size_t tcp_size = serialized_tcp_segment_size(payload_size);
         const size_t packet_size = ipv4_header_size + tcp_size;
@@ -615,12 +607,15 @@ private:
 
         Ip4Head head = {};
         head.version_ihl = 0x45;
+        head.total_length = htons(static_cast<uint16_t>(packet_size));
         head.ttl = 64;
         head.protocol = IP_PROTOCOL_TCP;
         std::memcpy(&head.source_address, &connection_info.server_ip.ipv4, sizeof(head.source_address));
         std::memcpy(&head.destination_address, &connection_info.client_ip.ipv4, sizeof(head.destination_address));
+        head.header_checksum = 0;
+        head.header_checksum = htons(static_cast<uint16_t>(~Checksum::Calculate(&head, sizeof(head))));
 
-        write_ipv4_header(head, packet_size, packet_bytes);
+        std::memcpy(packet_bytes, &head, sizeof(head));
         serialize_tcp_segment_with_checksum(
             connection_info,
             sequence_number,
