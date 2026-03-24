@@ -312,17 +312,17 @@ public:
             return ErrorCode::CloseBeforeEstablished;
         }
 
-        Flow* flow = &it->second;
+        Flow& flow = it->second;
         const error_code_t emit_result = emit_tcp_response(
-                flow->connection_info,
-                flow->server_next_sequence,
-                flow->client_next_sequence,
+                flow.connection_info,
+                flow.server_next_sequence,
+                flow.client_next_sequence,
                 TcpSegment::FlagsBuilder().set_ack().set_fin().flags());
         if (emit_result != ErrorCode::Ok) {
             return emit_result;
         }
-        flow->server_next_sequence += 1;
-        flow->state = FlowState::LastAck;
+        flow.server_next_sequence += 1;
+        flow.state = FlowState::LastAck;
         return ErrorCode::Ok;
     }
 
@@ -381,38 +381,38 @@ private:
             return ErrorCode::FlowNotFound;
         }
 
-        Flow* flow = &it->second;
+        Flow& flow = it->second;
         if (tcp_segment.is_rst()) {
-            const ConnectionInfo reset_flow = flow->connection_info;
-            ipv4_flows_.erase(reset_flow);
+            const ConnectionInfo reset_flow = flow.connection_info;
+            ipv4_flows_.erase(it);
             emit_reset(reset_flow);
             return ErrorCode::Ok;
         }
 
-        if (flow->state == FlowState::SynReceived) {
-            if (!tcp_segment.is_ack() || tcp_segment.acknowledgment_number != flow->server_next_sequence) {
+        if (flow.state == FlowState::SynReceived) {
+            if (!tcp_segment.is_ack() || tcp_segment.acknowledgment_number != flow.server_next_sequence) {
                 return fail_flow(
-                    flow->connection_info,
+                    flow.connection_info,
                     ErrorCode::HandshakeFinalAckExpected,
                     tcp_segment);
             }
 
-            if (tcp_segment.sequence_number != flow->client_next_sequence) {
+            if (tcp_segment.sequence_number != flow.client_next_sequence) {
                 return fail_flow(
-                    flow->connection_info,
+                    flow.connection_info,
                     ErrorCode::HandshakeClientSequenceUnexpected,
                     tcp_segment);
             }
 
-            flow->state = FlowState::Established;
+            flow.state = FlowState::Established;
             const auto cb = callbacks_.on_tcp_handshake_completed;
             if (cb) {
-                cb(callbacks_.user_data, flow->connection_info);
+                cb(callbacks_.user_data, flow.connection_info);
             }
             return ErrorCode::Ok;
         }
 
-        if (flow->state == FlowState::Established) {
+        if (flow.state == FlowState::Established) {
             return handle_established_packet(
                 flow,
                 tcp_segment);
@@ -467,10 +467,10 @@ private:
     }
 
     error_code_t handle_established_packet(
-        Flow* flow,
+        Flow& flow,
         const TcpSegment& segment) {
         if (segment.is_rst()) {
-            const ConnectionInfo reset_flow = flow->connection_info;
+            const ConnectionInfo reset_flow = flow.connection_info;
             ipv4_flows_.erase(reset_flow);
             emit_reset(reset_flow);
             return ErrorCode::Ok;
@@ -478,78 +478,76 @@ private:
 
         if (!segment.is_ack()) {
             return fail_flow(
-                flow->connection_info,
+                flow.connection_info,
                 ErrorCode::EstablishedAckRequired,
                 segment);
         }
 
-        if (segment.acknowledgment_number != flow->server_next_sequence) {
+        if (segment.acknowledgment_number != flow.server_next_sequence) {
             return fail_flow(
-                flow->connection_info,
+                flow.connection_info,
                 ErrorCode::EstablishedAckNumberUnexpected,
                 segment);
         }
 
-        if (segment.sequence_number != flow->client_next_sequence) {
+        if (segment.sequence_number != flow.client_next_sequence) {
             return fail_flow(
-                flow->connection_info,
+                flow.connection_info,
                 ErrorCode::EstablishedSequenceUnexpected,
                 segment);
         }
 
         if (!segment.payload.empty()) {
-            flow->client_next_sequence += static_cast<uint32_t>(segment.payload.size());
+            flow.client_next_sequence += static_cast<uint32_t>(segment.payload.size());
             const auto cb = callbacks_.on_tcp_payload_received;
             if (cb) {
                 cb(
                     callbacks_.user_data,
-                    flow->connection_info,
+                    flow.connection_info,
                     &segment.payload[0],
                     segment.payload.size());
             }
             return emit_tcp_response(
-                flow->connection_info,
-                flow->server_next_sequence,
-                flow->client_next_sequence,
+                flow.connection_info,
+                flow.server_next_sequence,
+                flow.client_next_sequence,
                 TcpSegment::FlagsBuilder().set_ack().flags());
         }
 
         if (segment.is_fin()) {
-            flow->client_next_sequence += 1;
-            flow->state = FlowState::LastAck;
+            flow.client_next_sequence += 1;
+            flow.state = FlowState::LastAck;
             const error_code_t emit_result = emit_tcp_response(
-                    flow->connection_info,
-                    flow->server_next_sequence,
-                    flow->client_next_sequence,
+                    flow.connection_info,
+                    flow.server_next_sequence,
+                    flow.client_next_sequence,
                     TcpSegment::FlagsBuilder().set_ack().set_fin().flags());
             if (emit_result != ErrorCode::Ok) {
                 return emit_result;
             }
-            flow->server_next_sequence += 1;
+            flow.server_next_sequence += 1;
             return ErrorCode::Ok;
         }
 
         return ErrorCode::Ok;
     }
 
-    error_code_t handle_last_ack_packet(
-        Flow* flow,
-        const TcpSegment& segment) {
+    error_code_t handle_last_ack_packet(const Flow& flow, const TcpSegment& segment) {
         if (!segment.is_ack()) {
             return fail_flow(
-                flow->connection_info,
+                flow.connection_info,
                 ErrorCode::CloseFinalAckExpected,
                 segment);
         }
 
-        if (segment.acknowledgment_number != flow->server_next_sequence) {
+        if (segment.acknowledgment_number != flow.server_next_sequence) {
             return fail_flow(
-                flow->connection_info,
+                flow.connection_info,
                 ErrorCode::CloseAckUnexpected,
                 segment);
         }
 
-        const ConnectionInfo completed_flow = flow->connection_info;
+        const ConnectionInfo completed_flow = flow.connection_info;
         ipv4_flows_.erase(completed_flow);
         const auto cb = callbacks_.on_tcp_connection_closed;
         if (cb) {
