@@ -17,6 +17,27 @@ using std::uint16_t;
 using std::uint32_t;
 
 /**
+ * @brief Non-owning view of TCP payload bytes.
+ */
+struct TcpPayloadView {
+    const uint8_t* bytes;
+    size_t byte_count;
+
+    void set(const uint8_t* payload_bytes, size_t payload_byte_count) {
+        bytes = payload_byte_count == 0 ? nullptr : payload_bytes;
+        byte_count = payload_byte_count;
+    }
+
+    const uint8_t* data() const { return bytes; }
+
+    size_t size() const { return byte_count; }
+
+    bool empty() const { return byte_count == 0; }
+
+    const uint8_t& operator[](size_t index) const { return bytes[index]; }
+};
+
+/**
  * @brief Parsed TCP segment without options.
  */
 struct TcpSegment {
@@ -35,8 +56,8 @@ struct TcpSegment {
     /** @brief Advertised TCP receive window. */
     uint16_t window_size;
 
-    /** @brief TCP payload bytes after the fixed header. */
-    std::vector<uint8_t> payload;
+    /** @brief Non-owning TCP payload bytes inside the original segment buffer. */
+    TcpPayloadView payload;
 
     uint8_t flags;
 
@@ -67,8 +88,6 @@ struct TcpSegment {
 
         uint8_t flags() const { return static_cast<uint8_t>(flags_); }
     };
-
-    TcpSegment();
 };
 
 /**
@@ -79,7 +98,9 @@ struct TcpSegment {
  *        not to the beginning of the full IP packet. The caller guarantees
  *        that @p bytes is not null and is aligned to alignof(TcpHead).
  * @param byte_count Size of @p bytes in bytes.
- * @param out_segment Output segment structure on success.
+ * @param out_segment Output segment structure on success. Its payload view
+ *        points into @p bytes and is valid only while that buffer remains
+ *        alive.
  * @return 0 if parsing succeeds; otherwise an error code.
  */
 mirage_tcp_error_code_t parse_tcp_segment(

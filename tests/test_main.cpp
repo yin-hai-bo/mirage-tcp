@@ -58,6 +58,20 @@ bool same_ipv6_address(const in6_addr& left, const in6_addr& right) {
     return std::memcmp(&left, &right, sizeof(left)) == 0;
 }
 
+bool same_payload(
+    const mirage_tcp::TcpPayloadView& payload_view,
+    const std::vector<std::uint8_t>& payload) {
+    if (payload_view.size() != payload.size()) {
+        return false;
+    }
+
+    if (payload.empty()) {
+        return true;
+    }
+
+    return std::memcmp(payload_view.data(), &payload[0], payload.size()) == 0;
+}
+
 void on_tcp_handshake_completed(void* user_data, const ConnectionInfo * connection_info) {
     CallbackContext* context = static_cast<CallbackContext*>(user_data);
     context->handshakes.push_back(*connection_info);
@@ -146,7 +160,7 @@ std::vector<std::uint8_t> build_client_packet(
         flags_builder.set_fin();
     }
     segment.flags = flags_builder.flags();
-    segment.payload = payload;
+    segment.payload.set(payload.empty() ? nullptr : &payload[0], payload.size());
 
     const std::vector<std::uint8_t> tcp_bytes = mirage_tcp::serialize_tcp_segment(segment);
     mirage_tcp::Ip4Head head = {};
@@ -660,7 +674,7 @@ void test_send_downstream_payload_generates_data_segment() {
     require(context.downstream_packets.size() == 2, "downstream payload should generate one packet");
     mirage_tcp::TcpSegment response = parse_tcp_from_ip(context.downstream_packets[1]);
     require(response.is_ack(), "downstream payload should carry ACK");
-    require(response.payload == payload, "downstream payload content mismatch");
+    require(same_payload(response.payload, payload), "downstream payload content mismatch");
 
     std::vector<std::uint8_t> payload_ack = build_client_packet(
         flow,
@@ -829,7 +843,9 @@ void test_c_api_send_downstream_payload_generates_data_segment() {
     const mirage_tcp::TcpSegment response = parse_tcp_from_ip(context.downstream_packets[1]);
     require(response.is_ack(), "C API downstream payload should carry ACK");
     require(
-        response.payload == std::vector<std::uint8_t>(payload, payload + sizeof(payload) - 1),
+        same_payload(
+            response.payload,
+            std::vector<std::uint8_t>(payload, payload + sizeof(payload) - 1)),
         "C API downstream payload content mismatch");
 
     std::vector<std::uint8_t> payload_ack = build_client_packet(

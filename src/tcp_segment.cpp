@@ -36,15 +36,6 @@ void write_u32_be(uint32_t value, uint8_t* bytes, size_t offset) {
 
 }  // namespace
 
-TcpSegment::TcpSegment()
-    : source_port(0),
-      destination_port(0),
-      sequence_number(0),
-      acknowledgment_number(0),
-      window_size(0),
-      flags(0)
-{}
-
 mirage_tcp_error_code_t parse_tcp_segment(
     const void* bytes,
     size_t byte_count,
@@ -74,10 +65,9 @@ mirage_tcp_error_code_t parse_tcp_segment(
     out_segment.acknowledgment_number = ntohl(tcp_head.acknowledgment_number);
     out_segment.window_size = ntohs(tcp_head.window_size);
     out_segment.flags = tcp_head.flags & 0x3fu;
-
-    out_segment.payload.assign(
+    out_segment.payload.set(
         raw_bytes + static_cast<std::ptrdiff_t>(header_length),
-        raw_bytes + static_cast<std::ptrdiff_t>(byte_count));
+        byte_count - header_length);
     return MTE_Ok;
 }
 
@@ -101,9 +91,11 @@ std::vector<uint8_t> serialize_tcp_segment(const TcpSegment& segment) {
     write_u16_be(0, tcp_head_bytes, offsetof(TcpHead, urgent_pointer));
 
     std::memcpy(&bytes[0], tcp_head_bytes, sizeof(tcp_head));
-
-    for (size_t i = 0; i < segment.payload.size(); ++i) {
-        bytes[header_length + i] = segment.payload[i];
+    if (!segment.payload.empty()) {
+        std::memcpy(
+            bytes.data() + header_length,
+            segment.payload.data(),
+            segment.payload.size());
     }
 
     return bytes;
