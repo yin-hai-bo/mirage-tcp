@@ -436,6 +436,40 @@ void test_final_ack_completes_handshake() {
     require(same_ipv4_address(context.handshakes[0].client_ip.ipv4, flow.client_ip.ipv4), "handshake flow client ip mismatch");
 }
 
+void test_final_ack_with_payload_is_reported_and_acked() {
+    CallbackContext context;
+    mirage_tcp::MirageTcp mirage_tcp = make_mirage_tcp(&context);
+    ConnectionInfo flow = make_flow();
+
+    std::vector<std::uint8_t> syn_packet = build_client_packet(flow, 1000, 0, true, false, false, std::vector<std::uint8_t>());
+    require(mirage_tcp.handle_incoming_ip_packet(&syn_packet[0], syn_packet.size()) == MTE_Ok, "SYN should be accepted");
+
+    mirage_tcp::TcpSegment syn_ack = parse_tcp_from_ip(context.downstream_packets[0]);
+    std::vector<std::uint8_t> payload;
+    payload.push_back('h');
+    payload.push_back('i');
+    std::vector<std::uint8_t> final_ack_with_payload = build_client_packet(
+        flow,
+        1001,
+        syn_ack.sequence_number + 1,
+        false,
+        true,
+        false,
+        payload);
+    require(
+        mirage_tcp.handle_incoming_ip_packet(&final_ack_with_payload[0], final_ack_with_payload.size()) == MTE_Ok,
+        "final ACK with payload should be accepted");
+
+    require(context.handshakes.size() == 1, "handshake callback should fire once");
+    require(context.payloads.size() == 1, "payload callback should fire once");
+    require(context.payloads[0] == payload, "payload callback content mismatch");
+    require(context.downstream_packets.size() == 2, "final ACK with payload should generate one ACK packet");
+
+    mirage_tcp::TcpSegment payload_ack = parse_tcp_from_ip(context.downstream_packets[1]);
+    require(payload_ack.is_ack(), "response to final ACK payload should ACK");
+    require(payload_ack.acknowledgment_number == 1003, "final ACK payload acknowledgment number mismatch");
+}
+
 void test_payload_is_reported_and_acked() {
     CallbackContext context;
     mirage_tcp::MirageTcp mirage_tcp = make_mirage_tcp(&context);
@@ -882,6 +916,7 @@ int main() {
     tests.push_back(TestCase{"connection_info_setters_populate_expected_fields", test_connection_info_setters_populate_expected_fields});
     tests.push_back(TestCase{"syn_generates_downstream_syn_ack", test_syn_generates_downstream_syn_ack});
     tests.push_back(TestCase{"final_ack_completes_handshake", test_final_ack_completes_handshake});
+    tests.push_back(TestCase{"final_ack_with_payload_is_reported_and_acked", test_final_ack_with_payload_is_reported_and_acked});
     tests.push_back(TestCase{"payload_is_reported_and_acked", test_payload_is_reported_and_acked});
     tests.push_back(TestCase{"fin_generates_fin_ack_and_close_event", test_fin_generates_fin_ack_and_close_event});
     tests.push_back(TestCase{"invalid_flow_reports_error", test_invalid_flow_reports_error});

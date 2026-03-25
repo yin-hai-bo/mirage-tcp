@@ -293,7 +293,12 @@ private:
             if (cb) {
                 cb(callbacks_.user_data, &flow.connection_info);
             }
-            return MTE_Ok;
+            if (tcp_segment.payload.empty() && !tcp_segment.is_fin()) {
+                return MTE_Ok;
+            }
+            return handle_established_packet(
+                flow,
+                tcp_segment);
         }
 
         if (flow.state == FlowState::Established) {
