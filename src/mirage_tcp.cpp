@@ -442,6 +442,13 @@ private:
                 segment);
         }
 
+        if (segment.sequence_number != flow.client_next_sequence) {
+            return fail_flow(
+                flow.connection_info,
+                MTE_CloseSequenceUnexpected,
+                segment);
+        }
+
         const ConnectionInfo completed_flow = flow.connection_info;
         ipv4_flows_.erase(completed_flow);
         const auto cb = callbacks_.on_tcp_connection_closed;

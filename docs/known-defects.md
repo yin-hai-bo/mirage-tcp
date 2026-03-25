@@ -14,7 +14,7 @@
 | --- | --- | --- | --- |
 | KD-001 | P1 | Resolved | 第三次握手 `ACK` 携带 `payload` 时，数据被静默丢弃 |
 | KD-002 | P1 | Resolved | 已建立连接收到 `payload + FIN` 组合段时，`FIN` 被忽略 |
-| KD-003 | P1 | Open | `LastAck` 状态未校验对端 `sequence_number` |
+| KD-003 | P1 | Resolved | `LastAck` 状态未校验对端 `sequence_number` |
 | KD-004 | P2 | Open | `IPv4 fragment` 只检查了 fragment offset，未检查 `MF` 标志 |
 | KD-005 | P2 | Open | Debug 下对入站包地址对齐做 `assert`，可能中止合法调用 |
 | KD-006 | P3 | Resolved | `mirage_tcp_set_connection_info_v4/v6()` 之前会解引用空指针 |
@@ -93,6 +93,8 @@
 
 优先级：`P1`
 
+状态：`Resolved`
+
 位置：
 
 - [`src/mirage_tcp.cpp:419`](C:/dev/MirageTCP/src/mirage_tcp.cpp#L419)
@@ -113,10 +115,15 @@
 - 按 established 阶段相同的规则校验 `sequence_number`
 - 不匹配时走现有 reset/cleanup 路径
 
-测试缺口：
+当前分支处理结果：
 
-- 当前测试只覆盖了“正确的最终关闭 `ACK`”
-- 没有覆盖“确认号正确但 `sequence_number` 错误”的关闭阶段非法报文
+- `handle_last_ack_packet()` 现在同时校验 `acknowledgment_number` 和 `sequence_number`
+- `sequence_number` 不匹配时会走现有 reset/cleanup 路径，不再错误关闭 flow
+- 新增错误码 `MTE_CloseSequenceUnexpected` 表示关闭阶段的对端序列号异常
+
+测试覆盖：
+
+- 已补“确认号正确但 `sequence_number` 错误”的关闭阶段 packet-level 测试
 
 ## KD-004 `IPv4 fragment` 只检查了 fragment offset，未检查 `MF` 标志
 
@@ -201,6 +208,5 @@
 
 ## 建议修复顺序
 
-1. 先修 `KD-003`
-2. 然后修 `KD-004` 与 `KD-005`
-3. 每修一项同时补一个最小 packet-level 测试
+1. 先修 `KD-004` 与 `KD-005`
+2. 每修一项同时补一个最小 packet-level 测试

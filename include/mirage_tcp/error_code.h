@@ -47,6 +47,7 @@ enum {
     MTE_TimeWaitExpired = 38,
     MTE_Unsupported = 39,
     MTE_OutOfMemory = 40,
+    MTE_CloseSequenceUnexpected = 41,
 };
 
 #ifdef __cplusplus

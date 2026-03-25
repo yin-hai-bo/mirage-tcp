@@ -783,6 +783,48 @@ void test_close_flow_generates_fin_ack_and_close_event() {
     require(context.closed_flows.size() == 1, "close_flow should eventually emit close callback");
 }
 
+void test_close_flow_rejects_final_ack_with_unexpected_sequence() {
+    CallbackContext context;
+    mirage_tcp::MirageTcp mirage_tcp = make_mirage_tcp(&context);
+    ConnectionInfo flow = make_flow();
+
+    std::vector<std::uint8_t> syn_packet = build_client_packet(flow, 1000, 0, true, false, false, std::vector<std::uint8_t>());
+    require(mirage_tcp.handle_incoming_ip_packet(&syn_packet[0], syn_packet.size()) == MTE_Ok, "SYN should be accepted");
+    mirage_tcp::TcpSegment syn_ack = parse_tcp_from_ip(context.downstream_packets[0]);
+
+    std::vector<std::uint8_t> final_ack = build_client_packet(
+        flow,
+        1001,
+        syn_ack.sequence_number + 1,
+        false,
+        true,
+        false,
+        std::vector<std::uint8_t>());
+    require(mirage_tcp.handle_incoming_ip_packet(&final_ack[0], final_ack.size()) == MTE_Ok, "final ACK should be accepted");
+
+    require(mirage_tcp.close_flow(flow) == MTE_Ok, "close_flow should succeed");
+    require(context.downstream_packets.size() == 2, "close_flow should generate one FIN+ACK");
+    mirage_tcp::TcpSegment fin_ack = parse_tcp_from_ip(context.downstream_packets[1]);
+
+    std::vector<std::uint8_t> invalid_close_ack = build_client_packet(
+        flow,
+        1002,
+        fin_ack.sequence_number + 1,
+        false,
+        true,
+        false,
+        std::vector<std::uint8_t>());
+    require(
+        mirage_tcp.handle_incoming_ip_packet(&invalid_close_ack[0], invalid_close_ack.size()) == MTE_CloseSequenceUnexpected,
+        "final ACK with unexpected sequence should fail");
+    require(context.closed_flows.empty(), "invalid final ACK should not close flow");
+    require(context.reset_flows.size() == 1, "invalid final ACK sequence should reset flow");
+    require(context.downstream_packets.size() == 3, "invalid final ACK sequence should generate one reset packet");
+
+    mirage_tcp::TcpSegment reset = parse_tcp_from_ip(context.downstream_packets[2]);
+    require(reset.is_rst(), "invalid final ACK sequence response should be RST");
+}
+
 void test_incoming_rst_clears_flow() {
     CallbackContext context;
     mirage_tcp::MirageTcp mirage_tcp = make_mirage_tcp(&context);
@@ -1000,6 +1042,7 @@ int main() {
     tests.push_back(TestCase{"ipv4_non_tcp_packet_reports_is_not_tcp", test_ipv4_non_tcp_packet_reports_is_not_tcp});
     tests.push_back(TestCase{"send_downstream_payload_generates_data_segment", test_send_downstream_payload_generates_data_segment});
     tests.push_back(TestCase{"close_flow_generates_fin_ack_and_close_event", test_close_flow_generates_fin_ack_and_close_event});
+    tests.push_back(TestCase{"close_flow_rejects_final_ack_with_unexpected_sequence", test_close_flow_rejects_final_ack_with_unexpected_sequence});
     tests.push_back(TestCase{"incoming_rst_clears_flow", test_incoming_rst_clears_flow});
     tests.push_back(TestCase{"invalid_ack_resets_existing_flow", test_invalid_ack_resets_existing_flow});
     tests.push_back(TestCase{"c_api_create_validates_arguments", test_c_api_create_validates_arguments});
