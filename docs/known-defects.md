@@ -18,6 +18,7 @@
 | KD-004 | P2 | Resolved | `IPv4 fragment` 只检查了 fragment offset，未检查 `MF` 标志 |
 | KD-005 | P2 | Open | Debug 下对入站包地址对齐做 `assert`，可能中止合法调用 |
 | KD-006 | P3 | Resolved | `mirage_tcp_set_connection_info_v4/v6()` 之前会解引用空指针 |
+| KD-007 | P2 | Open | 下行发送不感知协商 `MSS`，大 payload 会被打成单个 segment |
 
 ## KD-001 第三次握手 `ACK` 携带 `payload` 时数据被静默丢弃
 
@@ -213,7 +214,42 @@
 - 现在任一指针参数为空时直接返回，不改写 `target`
 - 已补正常填充与空指针忽略的测试
 
+## KD-007 下行发送不感知协商 `MSS`，大 payload 会被打成单个 segment
+
+优先级：`P2`
+
+状态：`Open`
+
+位置：
+
+- [`src/mirage_tcp.cpp:146`](C:/dev/MirageTCP/src/mirage_tcp.cpp#L146)
+- [`src/mirage_tcp.cpp:508`](C:/dev/MirageTCP/src/mirage_tcp.cpp#L508)
+- [`README.md:71`](C:/dev/MirageTCP/README.md#L71)
+
+问题描述：
+
+- `send_downstream_tcp_payload()` 直接把调用方提供的整块 payload 封成一个 TCP segment
+- 当前实现既不解析握手阶段的 `TCP option`，也不会记录对端协商出的 `MSS`
+- 因此只要宿主提供一个较大的 downstream payload，库就可能发出一个超过对端 `MSS` 的单个 segment
+
+影响：
+
+- 作为被模拟的 TCP 对端，这种行为不符合已协商 `MSS` 的发送语义
+- 即使本地注入路径有时仍能接受该大包，协议层行为也不再像一个正确的 TCP peer
+- 这会限制 `send_downstream_tcp_payload()` 在更真实网络条件或更严格宿主环境中的可用性
+
+建议修复方向：
+
+- 在握手阶段解析 `TCP MSS option`
+- 在 flow 上记录对端可接收的最大 segment size
+- `send_downstream_tcp_payload()` 按记录的 `MSS` 分段发包，而不是一次发出单个大 segment
+
+测试缺口：
+
+- 当前没有覆盖“超过协商 `MSS` 的 downstream payload 应被拆分”的 packet-level 测试
+
 ## 建议修复顺序
 
-1. 先修 `KD-004` 与 `KD-005`
-2. 每修一项同时补一个最小 packet-level 测试
+1. 先修 `KD-005`
+2. 再评估 `KD-007` 是否纳入当前阶段范围
+3. 每修一项同时补一个最小 packet-level 测试
