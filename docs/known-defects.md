@@ -15,7 +15,7 @@
 | KD-001 | P1 | Resolved | 第三次握手 `ACK` 携带 `payload` 时，数据被静默丢弃 |
 | KD-002 | P1 | Resolved | 已建立连接收到 `payload + FIN` 组合段时，`FIN` 被忽略 |
 | KD-003 | P1 | Resolved | `LastAck` 状态未校验对端 `sequence_number` |
-| KD-004 | P2 | Open | `IPv4 fragment` 只检查了 fragment offset，未检查 `MF` 标志 |
+| KD-004 | P2 | Resolved | `IPv4 fragment` 只检查了 fragment offset，未检查 `MF` 标志 |
 | KD-005 | P2 | Open | Debug 下对入站包地址对齐做 `assert`，可能中止合法调用 |
 | KD-006 | P3 | Resolved | `mirage_tcp_set_connection_info_v4/v6()` 之前会解引用空指针 |
 
@@ -129,6 +129,8 @@
 
 优先级：`P2`
 
+状态：`Resolved`
+
 位置：
 
 - [`src/ipv4_packet.cpp:77`](C:/dev/MirageTCP/src/ipv4_packet.cpp#L77)
@@ -150,9 +152,14 @@
 - 同时检查 fragment offset 和 `MF` 标志
 - 任何分片报文都统一返回 `MTE_Ipv4FragmentUnsupported`
 
-测试缺口：
+当前分支处理结果：
 
-- 当前没有覆盖“offset=0 但 `MF=1`”的首片场景
+- IPv4 解析现在同时检查 fragment offset 和 `MF` 标志
+- 任何分片报文都会统一返回 `MTE_Ipv4FragmentUnsupported`
+
+测试覆盖：
+
+- 已补“offset=0 且 `MF=1`”的首片 packet-level 测试
 
 ## KD-005 Debug 下对入站包地址对齐做 `assert`，可能中止合法调用
 

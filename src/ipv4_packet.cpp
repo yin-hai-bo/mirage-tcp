@@ -8,6 +8,9 @@ namespace mirage_tcp {
 
 namespace {
 
+static constexpr uint16_t IPV4_FRAGMENT_OFFSET_MASK = 0x1fffU;
+static constexpr uint16_t IPV4_MORE_FRAGMENTS_FLAG = 0x2000U;
+
 uint16_t read_u16_be(const uint8_t* bytes) {
     return static_cast<uint16_t>(
         (static_cast<uint16_t>(bytes[0]) << 8) |
@@ -75,7 +78,7 @@ mirage_tcp_error_code_t parse_ipv4_tcp_packet(
     }
 
     const uint16_t flags_and_fragment = ntohs(head.flags_fragment_offset);
-    if ((flags_and_fragment & 0x1fffU) != 0U) {
+    if ((flags_and_fragment & (IPV4_FRAGMENT_OFFSET_MASK | IPV4_MORE_FRAGMENTS_FLAG)) != 0U) {
         return MTE_Ipv4FragmentUnsupported;
     }
 

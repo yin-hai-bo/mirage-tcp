@@ -701,6 +701,29 @@ void test_ipv4_non_tcp_packet_reports_is_not_tcp() {
         "ipv4 non-tcp packet should report is not tcp");
 }
 
+void test_ipv4_first_fragment_with_more_fragments_flag_is_rejected() {
+    CallbackContext context;
+    mirage_tcp::MirageTcp mirage_tcp = make_mirage_tcp(&context);
+    ConnectionInfo flow = make_flow();
+
+    std::vector<std::uint8_t> payload(4, 0);
+    mirage_tcp::Ip4Head head = {};
+    head.version_ihl = 0x45;
+    head.ttl = 64;
+    head.protocol = mirage_tcp::IP_PROTOCOL_TCP;
+    head.flags_fragment_offset = htons(0x2000U);
+    std::memcpy(&head.source_address, &flow.client_ip.ipv4, sizeof(head.source_address));
+    std::memcpy(&head.destination_address, &flow.server_ip.ipv4, sizeof(head.destination_address));
+
+    std::vector<std::uint8_t> packet;
+    require(
+        mirage_tcp::serialize_ipv4_packet(head, &payload[0], payload.size(), &packet) == MTE_Ok,
+        "ipv4 first fragment serialization should succeed");
+    require(
+        mirage_tcp.handle_incoming_ip_packet(&packet[0], packet.size()) == MTE_Ipv4FragmentUnsupported,
+        "ipv4 first fragment with MF should be rejected");
+}
+
 void test_send_downstream_payload_generates_data_segment() {
     CallbackContext context;
     mirage_tcp::MirageTcp mirage_tcp = make_mirage_tcp(&context);
@@ -1040,6 +1063,7 @@ int main() {
     tests.push_back(TestCase{"short_packet_returns_packet_too_short_without_error_callback", test_short_packet_returns_packet_too_short_without_error_callback});
     tests.push_back(TestCase{"ipv6_tcp_packet_reports_unsupported", test_ipv6_tcp_packet_reports_unsupported});
     tests.push_back(TestCase{"ipv4_non_tcp_packet_reports_is_not_tcp", test_ipv4_non_tcp_packet_reports_is_not_tcp});
+    tests.push_back(TestCase{"ipv4_first_fragment_with_more_fragments_flag_is_rejected", test_ipv4_first_fragment_with_more_fragments_flag_is_rejected});
     tests.push_back(TestCase{"send_downstream_payload_generates_data_segment", test_send_downstream_payload_generates_data_segment});
     tests.push_back(TestCase{"close_flow_generates_fin_ack_and_close_event", test_close_flow_generates_fin_ack_and_close_event});
     tests.push_back(TestCase{"close_flow_rejects_final_ack_with_unexpected_sequence", test_close_flow_rejects_final_ack_with_unexpected_sequence});
