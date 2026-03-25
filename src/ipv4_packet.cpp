@@ -91,7 +91,7 @@ mirage_tcp_error_code_t serialize_ipv4_packet(
     const void* payload,
     size_t payload_size,
     std::vector<uint8_t>* bytes) {
-    if (bytes == NULL) {
+    if (bytes == nullptr) {
         return MTE_InvalidArgument;
     }
 
@@ -107,7 +107,7 @@ mirage_tcp_error_code_t serialize_ipv4_packet(
     write_u16_be(0, &serialized_bytes[10]);
     write_u16_be(internet_checksum(&serialized_bytes[0], header_size), &serialized_bytes[10]);
 
-    if (payload != NULL && payload_size > 0) {
+    if (payload != nullptr && payload_size > 0) {
         const uint8_t* payload_bytes = static_cast<const uint8_t*>(payload);
         for (size_t i = 0; i < payload_size; ++i) {
             serialized_bytes[header_size + i] = payload_bytes[i];

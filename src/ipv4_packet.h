@@ -54,7 +54,7 @@ struct Ip4PacketView {
  * @brief Parses one inbound IPv4/TCP packet into a non-owning view.
  *
  * @param packet Pointer to the raw IP packet bytes to validate as IPv4/TCP.
- *               The caller must guarantee that @p packet is not NULL.
+ *               The caller must guarantee that @p packet is not nullptr.
  * @param packet_size Size of @p packet in bytes.
  * @param parsed_packet Output packet view on success.
  * @return 0 if parsing succeeds as IPv4/TCP; otherwise an error code.

@@ -46,6 +46,8 @@ typedef struct {
  * @param client_port Client TCP port.
  * @param server_port Server TCP port.
  * @param target Output structure to initialize.
+ *
+ * Any NULL pointer argument is ignored and leaves @p target unchanged.
  */
 void mirage_tcp_set_connection_info_v4(
     const struct in_addr * client_ipv4,
@@ -62,6 +64,8 @@ void mirage_tcp_set_connection_info_v4(
  * @param client_port Client TCP port.
  * @param server_port Server TCP port.
  * @param target Output structure to initialize.
+ *
+ * Any NULL pointer argument is ignored and leaves @p target unchanged.
  */
 void mirage_tcp_set_connection_info_v6(
     const struct in6_addr * client_ipv6,

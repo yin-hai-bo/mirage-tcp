@@ -54,6 +54,10 @@ bool same_ipv4_address(const in_addr& left, const in_addr& right) {
     return std::memcmp(&left, &right, sizeof(left)) == 0;
 }
 
+bool same_ipv6_address(const in6_addr& left, const in6_addr& right) {
+    return std::memcmp(&left, &right, sizeof(left)) == 0;
+}
+
 void on_tcp_handshake_completed(void* user_data, const ConnectionInfo * connection_info) {
     CallbackContext* context = static_cast<CallbackContext*>(user_data);
     context->handshakes.push_back(*connection_info);
@@ -100,9 +104,9 @@ mirage_tcp_object make_mirage_tcp_c(CallbackContext* context) {
     callbacks.on_tcp_connection_closed = on_tcp_connection_closed;
     callbacks.on_tcp_connection_reset = on_tcp_connection_reset;
 
-    mirage_tcp_object instance = NULL;
+    mirage_tcp_object instance = nullptr;
     require(mirage_tcp_create(&callbacks, &instance) == MTE_Ok, "mirage_tcp_create should succeed");
-    require(instance != NULL, "mirage_tcp_create should return non-null handle");
+    require(instance != nullptr, "mirage_tcp_create should return non-null handle");
     return instance;
 }
 
@@ -333,6 +337,64 @@ void test_connection_info_hash_and_equal_work_with_unordered_map() {
     require(values.find(different_port) == values.end(), "unordered_map should not match different port");
 }
 
+void test_connection_info_setters_ignore_null_arguments() {
+    ConnectionInfo ipv4_target;
+    std::memset(&ipv4_target, 0x5a, sizeof(ipv4_target));
+    const ConnectionInfo ipv4_before = ipv4_target;
+    const in_addr client_ipv4 = make_ipv4_address(10, 0, 0, 1);
+    const in_addr server_ipv4 = make_ipv4_address(93, 184, 216, 34);
+
+    mirage_tcp_set_connection_info_v4(nullptr, &server_ipv4, 12345, 443, &ipv4_target);
+    require(std::memcmp(&ipv4_target, &ipv4_before, sizeof(ipv4_target)) == 0, "null client ipv4 should leave target unchanged");
+
+    mirage_tcp_set_connection_info_v4(&client_ipv4, nullptr, 12345, 443, &ipv4_target);
+    require(std::memcmp(&ipv4_target, &ipv4_before, sizeof(ipv4_target)) == 0, "null server ipv4 should leave target unchanged");
+
+    mirage_tcp_set_connection_info_v4(&client_ipv4, &server_ipv4, 12345, 443, nullptr);
+
+    ConnectionInfo ipv6_target;
+    std::memset(&ipv6_target, 0x6b, sizeof(ipv6_target));
+    const ConnectionInfo ipv6_before = ipv6_target;
+    const std::uint8_t client_ipv6_bytes[16] = {0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1};
+    const std::uint8_t server_ipv6_bytes[16] = {0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 2};
+    const in6_addr client_ipv6 = make_ipv6_address(client_ipv6_bytes);
+    const in6_addr server_ipv6 = make_ipv6_address(server_ipv6_bytes);
+
+    mirage_tcp_set_connection_info_v6(nullptr, &server_ipv6, 12345, 443, &ipv6_target);
+    require(std::memcmp(&ipv6_target, &ipv6_before, sizeof(ipv6_target)) == 0, "null client ipv6 should leave target unchanged");
+
+    mirage_tcp_set_connection_info_v6(&client_ipv6, nullptr, 12345, 443, &ipv6_target);
+    require(std::memcmp(&ipv6_target, &ipv6_before, sizeof(ipv6_target)) == 0, "null server ipv6 should leave target unchanged");
+
+    mirage_tcp_set_connection_info_v6(&client_ipv6, &server_ipv6, 12345, 443, nullptr);
+}
+
+void test_connection_info_setters_populate_expected_fields() {
+    const in_addr client_ipv4 = make_ipv4_address(10, 0, 0, 1);
+    const in_addr server_ipv4 = make_ipv4_address(93, 184, 216, 34);
+    ConnectionInfo ipv4_target;
+    mirage_tcp_set_connection_info_v4(&client_ipv4, &server_ipv4, 12345, 443, &ipv4_target);
+
+    require(ipv4_target.ip_ver == 4, "ipv4 setter should set ip version");
+    require(ipv4_target.client_port == 12345, "ipv4 setter should set client port");
+    require(ipv4_target.server_port == 443, "ipv4 setter should set server port");
+    require(same_ipv4_address(ipv4_target.client_ip.ipv4, client_ipv4), "ipv4 setter should set client address");
+    require(same_ipv4_address(ipv4_target.server_ip.ipv4, server_ipv4), "ipv4 setter should set server address");
+
+    const std::uint8_t client_ipv6_bytes[16] = {0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1};
+    const std::uint8_t server_ipv6_bytes[16] = {0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 2};
+    const in6_addr client_ipv6 = make_ipv6_address(client_ipv6_bytes);
+    const in6_addr server_ipv6 = make_ipv6_address(server_ipv6_bytes);
+    ConnectionInfo ipv6_target;
+    mirage_tcp_set_connection_info_v6(&client_ipv6, &server_ipv6, 23456, 8443, &ipv6_target);
+
+    require(ipv6_target.ip_ver == 6, "ipv6 setter should set ip version");
+    require(ipv6_target.client_port == 23456, "ipv6 setter should set client port");
+    require(ipv6_target.server_port == 8443, "ipv6 setter should set server port");
+    require(same_ipv6_address(ipv6_target.client_ip.ipv6, client_ipv6), "ipv6 setter should set client address");
+    require(same_ipv6_address(ipv6_target.server_ip.ipv6, server_ipv6), "ipv6 setter should set server address");
+}
+
 void test_syn_generates_downstream_syn_ack() {
     CallbackContext context;
     mirage_tcp::MirageTcp mirage_tcp = make_mirage_tcp(&context);
@@ -485,7 +547,7 @@ void test_null_packet_returns_invalid_argument_without_error_callback() {
     mirage_tcp::MirageTcp mirage_tcp = make_mirage_tcp(&context);
 
     require(
-        mirage_tcp.handle_incoming_ip_packet(NULL, 20) == MTE_InvalidArgument,
+        mirage_tcp.handle_incoming_ip_packet(nullptr, 20) == MTE_InvalidArgument,
         "null packet should return invalid argument");
 }
 
@@ -689,18 +751,18 @@ void test_invalid_ack_resets_existing_flow() {
 
 void test_c_api_create_validates_arguments() {
     mirage_tcp_callbacks_t callbacks = {};
-    mirage_tcp_object instance = NULL;
+    mirage_tcp_object instance = nullptr;
 
     require(
-        mirage_tcp_create(NULL, &instance) == MTE_InvalidArgument,
+        mirage_tcp_create(nullptr, &instance) == MTE_InvalidArgument,
         "mirage_tcp_create should reject null callbacks");
     require(
-        mirage_tcp_create(&callbacks, NULL) == MTE_InvalidArgument,
+        mirage_tcp_create(&callbacks, nullptr) == MTE_InvalidArgument,
         "mirage_tcp_create should reject null result");
 }
 
 void test_c_api_destroy_accepts_null() {
-    mirage_tcp_destroy(NULL);
+    mirage_tcp_destroy(nullptr);
 }
 
 void test_c_api_handle_incoming_ip_packet_completes_handshake() {
@@ -789,19 +851,19 @@ void test_c_api_rejects_null_instance_and_connection_info() {
     const mirage_tcp_object instance = make_mirage_tcp_c(&context);
 
     require(
-        mirage_tcp_handle_incoming_ip_packet(NULL, packet, sizeof(packet)) == MTE_InvalidArgument,
+        mirage_tcp_handle_incoming_ip_packet(nullptr, packet, sizeof(packet)) == MTE_InvalidArgument,
         "C API handle_incoming_ip_packet should reject null instance");
     require(
-        mirage_tcp_send_downstream_tcp_payload(NULL, &flow, "x", 1) == MTE_InvalidArgument,
+        mirage_tcp_send_downstream_tcp_payload(nullptr, &flow, "x", 1) == MTE_InvalidArgument,
         "C API send_downstream_tcp_payload should reject null instance");
     require(
-        mirage_tcp_send_downstream_tcp_payload(instance, NULL, "x", 1) == MTE_InvalidArgument,
+        mirage_tcp_send_downstream_tcp_payload(instance, nullptr, "x", 1) == MTE_InvalidArgument,
         "C API send_downstream_tcp_payload should reject null connection info");
     require(
-        mirage_tcp_close_flow(NULL, &flow) == MTE_InvalidArgument,
+        mirage_tcp_close_flow(nullptr, &flow) == MTE_InvalidArgument,
         "C API close_flow should reject null instance");
     require(
-        mirage_tcp_close_flow(instance, NULL) == MTE_InvalidArgument,
+        mirage_tcp_close_flow(instance, nullptr) == MTE_InvalidArgument,
         "C API close_flow should reject null connection info");
 
     mirage_tcp_destroy(instance);
@@ -816,6 +878,8 @@ int main() {
     tests.push_back(TestCase{"connection_info_equal_uses_ipv4_s_addr", test_connection_info_equal_uses_ipv4_s_addr});
     tests.push_back(TestCase{"connection_info_equal_uses_memcmp_for_ipv6", test_connection_info_equal_uses_memcmp_for_ipv6});
     tests.push_back(TestCase{"connection_info_hash_and_equal_work_with_unordered_map", test_connection_info_hash_and_equal_work_with_unordered_map});
+    tests.push_back(TestCase{"connection_info_setters_ignore_null_arguments", test_connection_info_setters_ignore_null_arguments});
+    tests.push_back(TestCase{"connection_info_setters_populate_expected_fields", test_connection_info_setters_populate_expected_fields});
     tests.push_back(TestCase{"syn_generates_downstream_syn_ack", test_syn_generates_downstream_syn_ack});
     tests.push_back(TestCase{"final_ack_completes_handshake", test_final_ack_completes_handshake});
     tests.push_back(TestCase{"payload_is_reported_and_acked", test_payload_is_reported_and_acked});

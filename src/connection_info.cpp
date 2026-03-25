@@ -18,6 +18,9 @@ static void set_connection_info(
     uint16_t server_port,
     ConnectionInfo * target)
 {
+    if (target == nullptr) {
+        return;
+    }
     std::memset(target, 0, sizeof(*target));
     target->client_port = client_port;
     target->server_port = server_port;
@@ -31,6 +34,9 @@ void mirage_tcp_set_connection_info_v4(
     uint16_t server_port,
     ConnectionInfo * target)
 {
+    if (client_ipv4 == nullptr || server_ipv4 == nullptr || target == nullptr) {
+        return;
+    }
     set_connection_info(4, client_port, server_port, target);
     target->client_ip.ipv4.s_addr = client_ipv4->s_addr;
     target->server_ip.ipv4.s_addr = server_ipv4->s_addr;
@@ -43,6 +49,9 @@ void mirage_tcp_set_connection_info_v6(
     uint16_t server_port,
     ConnectionInfo * target)
 {
+    if (client_ipv6 == nullptr || server_ipv6 == nullptr || target == nullptr) {
+        return;
+    }
     set_connection_info(6, client_port, server_port, target);
     std::memcpy(&target->client_ip.ipv6, client_ipv6, sizeof(in6_addr));
     std::memcpy(&target->server_ip.ipv6, server_ipv6, sizeof(in6_addr));

@@ -92,7 +92,7 @@ void serialize_tcp_segment_with_checksum(
 }
 
 mirage_tcp_error_code_t parse_ipv6_tcp_packet(const void* packet, size_t packet_size) {
-    if (packet == NULL) {
+    if (packet == nullptr) {
         return MTE_InvalidArgument;
     }
 
