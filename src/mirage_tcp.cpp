@@ -591,6 +591,9 @@ mirage_tcp_error_code_t mirage_tcp_handle_incoming_ip_packet(
     const void * ip_packet,
     size_t ip_packet_size)         
 {
+    if (instance == nullptr) {
+        return MTE_InvalidArgument;
+    }
     return reinterpret_cast<mirage_tcp::MirageTcp *>(instance)
         ->handle_incoming_ip_packet(ip_packet, ip_packet_size);
 }
@@ -601,6 +604,9 @@ mirage_tcp_error_code_t mirage_tcp_send_downstream_tcp_payload(
     const void * payload,
     size_t payload_size)         
 {
+    if (instance == nullptr || connection_info == nullptr) {
+        return MTE_InvalidArgument;
+    }
     return reinterpret_cast<mirage_tcp::MirageTcp *>(instance)
         ->send_downstream_tcp_payload(
             *connection_info,
@@ -612,6 +618,9 @@ mirage_tcp_error_code_t mirage_tcp_close_flow(
     mirage_tcp_object instance,
     const mirage_tcp_connection_info_t * connection_info)
 {
+    if (instance == nullptr || connection_info == nullptr) {
+        return MTE_InvalidArgument;
+    }
     return reinterpret_cast<mirage_tcp::MirageTcp *>(instance)
         ->close_flow(*connection_info);
 }

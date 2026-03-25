@@ -91,6 +91,21 @@ mirage_tcp::MirageTcp make_mirage_tcp(CallbackContext* context) {
     return mirage_tcp::MirageTcp(callbacks);
 }
 
+mirage_tcp_object make_mirage_tcp_c(CallbackContext* context) {
+    mirage_tcp_callbacks_t callbacks = {};
+    callbacks.user_data = context;
+    callbacks.on_downstream_ip_packet_generated = on_downstream_ip_packet_generated;
+    callbacks.on_tcp_handshake_completed = on_tcp_handshake_completed;
+    callbacks.on_tcp_payload_received = on_tcp_payload_received;
+    callbacks.on_tcp_connection_closed = on_tcp_connection_closed;
+    callbacks.on_tcp_connection_reset = on_tcp_connection_reset;
+
+    mirage_tcp_object instance = NULL;
+    require(mirage_tcp_create(&callbacks, &instance) == MTE_Ok, "mirage_tcp_create should succeed");
+    require(instance != NULL, "mirage_tcp_create should return non-null handle");
+    return instance;
+}
+
 ConnectionInfo make_flow() {
     ConnectionInfo result;
     mirage_tcp_set_connection_info_v4(
@@ -155,6 +170,38 @@ mirage_tcp::TcpSegment parse_tcp_from_ip(const std::vector<std::uint8_t>& packet
         mirage_tcp::parse_tcp_segment(&packet_bytes[header_length], packet_bytes.size() - header_length, segment) == MTE_Ok,
         "tcp parse should succeed");
     return segment;
+}
+
+mirage_tcp::TcpSegment establish_flow_via_c_api(
+    mirage_tcp_object instance,
+    CallbackContext* context,
+    const ConnectionInfo& flow) {
+    std::vector<std::uint8_t> syn_packet = build_client_packet(
+        flow,
+        1000,
+        0,
+        true,
+        false,
+        false,
+        std::vector<std::uint8_t>());
+    require(
+        mirage_tcp_handle_incoming_ip_packet(instance, &syn_packet[0], syn_packet.size()) == MTE_Ok,
+        "C API SYN should be accepted");
+    require(context->downstream_packets.size() == 1, "C API SYN should generate one downstream packet");
+
+    mirage_tcp::TcpSegment syn_ack = parse_tcp_from_ip(context->downstream_packets[0]);
+    std::vector<std::uint8_t> final_ack = build_client_packet(
+        flow,
+        1001,
+        syn_ack.sequence_number + 1,
+        false,
+        true,
+        false,
+        std::vector<std::uint8_t>());
+    require(
+        mirage_tcp_handle_incoming_ip_packet(instance, &final_ack[0], final_ack.size()) == MTE_Ok,
+        "C API final ACK should be accepted");
+    return syn_ack;
 }
 
 void test_ipv4_roundtrip() {
@@ -640,6 +687,126 @@ void test_invalid_ack_resets_existing_flow() {
     require(reset.is_rst(), "invalid final ACK response should be RST");
 }
 
+void test_c_api_create_validates_arguments() {
+    mirage_tcp_callbacks_t callbacks = {};
+    mirage_tcp_object instance = NULL;
+
+    require(
+        mirage_tcp_create(NULL, &instance) == MTE_InvalidArgument,
+        "mirage_tcp_create should reject null callbacks");
+    require(
+        mirage_tcp_create(&callbacks, NULL) == MTE_InvalidArgument,
+        "mirage_tcp_create should reject null result");
+}
+
+void test_c_api_destroy_accepts_null() {
+    mirage_tcp_destroy(NULL);
+}
+
+void test_c_api_handle_incoming_ip_packet_completes_handshake() {
+    CallbackContext context;
+    const ConnectionInfo flow = make_flow();
+    const mirage_tcp_object instance = make_mirage_tcp_c(&context);
+
+    const mirage_tcp::TcpSegment syn_ack = establish_flow_via_c_api(instance, &context, flow);
+
+    require(syn_ack.is_syn(), "C API handshake response should contain SYN");
+    require(syn_ack.is_ack(), "C API handshake response should contain ACK");
+    require(context.handshakes.size() == 1, "C API handshake callback should fire once");
+    require(context.handshakes[0].client_port == flow.client_port, "C API handshake flow client port mismatch");
+
+    mirage_tcp_destroy(instance);
+}
+
+void test_c_api_send_downstream_payload_generates_data_segment() {
+    CallbackContext context;
+    const ConnectionInfo flow = make_flow();
+    const mirage_tcp_object instance = make_mirage_tcp_c(&context);
+    establish_flow_via_c_api(instance, &context, flow);
+
+    const char payload[] = "pong";
+    require(
+        mirage_tcp_send_downstream_tcp_payload(instance, &flow, payload, sizeof(payload) - 1) == MTE_Ok,
+        "C API send_downstream_tcp_payload should succeed");
+    require(context.downstream_packets.size() == 2, "C API downstream payload should generate one packet");
+
+    const mirage_tcp::TcpSegment response = parse_tcp_from_ip(context.downstream_packets[1]);
+    require(response.is_ack(), "C API downstream payload should carry ACK");
+    require(
+        response.payload == std::vector<std::uint8_t>(payload, payload + sizeof(payload) - 1),
+        "C API downstream payload content mismatch");
+
+    std::vector<std::uint8_t> payload_ack = build_client_packet(
+        flow,
+        1001,
+        response.sequence_number + static_cast<std::uint32_t>(sizeof(payload) - 1),
+        false,
+        true,
+        false,
+        std::vector<std::uint8_t>());
+    require(
+        mirage_tcp_handle_incoming_ip_packet(instance, &payload_ack[0], payload_ack.size()) == MTE_Ok,
+        "C API downstream payload ACK should be accepted");
+
+    mirage_tcp_destroy(instance);
+}
+
+void test_c_api_close_flow_generates_fin_ack_and_close_event() {
+    CallbackContext context;
+    const ConnectionInfo flow = make_flow();
+    const mirage_tcp_object instance = make_mirage_tcp_c(&context);
+    establish_flow_via_c_api(instance, &context, flow);
+
+    require(
+        mirage_tcp_close_flow(instance, &flow) == MTE_Ok,
+        "C API close_flow should succeed");
+    require(context.downstream_packets.size() == 2, "C API close_flow should generate one FIN+ACK");
+
+    const mirage_tcp::TcpSegment fin_ack = parse_tcp_from_ip(context.downstream_packets[1]);
+    require(fin_ack.is_fin(), "C API close_flow response should include FIN");
+    require(fin_ack.is_ack(), "C API close_flow response should include ACK");
+
+    std::vector<std::uint8_t> close_ack = build_client_packet(
+        flow,
+        1001,
+        fin_ack.sequence_number + 1,
+        false,
+        true,
+        false,
+        std::vector<std::uint8_t>());
+    require(
+        mirage_tcp_handle_incoming_ip_packet(instance, &close_ack[0], close_ack.size()) == MTE_Ok,
+        "C API final ACK for close should be accepted");
+    require(context.closed_flows.size() == 1, "C API close_flow should emit close callback");
+
+    mirage_tcp_destroy(instance);
+}
+
+void test_c_api_rejects_null_instance_and_connection_info() {
+    CallbackContext context;
+    const ConnectionInfo flow = make_flow();
+    const std::uint8_t packet[20] = {};
+    const mirage_tcp_object instance = make_mirage_tcp_c(&context);
+
+    require(
+        mirage_tcp_handle_incoming_ip_packet(NULL, packet, sizeof(packet)) == MTE_InvalidArgument,
+        "C API handle_incoming_ip_packet should reject null instance");
+    require(
+        mirage_tcp_send_downstream_tcp_payload(NULL, &flow, "x", 1) == MTE_InvalidArgument,
+        "C API send_downstream_tcp_payload should reject null instance");
+    require(
+        mirage_tcp_send_downstream_tcp_payload(instance, NULL, "x", 1) == MTE_InvalidArgument,
+        "C API send_downstream_tcp_payload should reject null connection info");
+    require(
+        mirage_tcp_close_flow(NULL, &flow) == MTE_InvalidArgument,
+        "C API close_flow should reject null instance");
+    require(
+        mirage_tcp_close_flow(instance, NULL) == MTE_InvalidArgument,
+        "C API close_flow should reject null connection info");
+
+    mirage_tcp_destroy(instance);
+}
+
 }  // namespace
 
 int main() {
@@ -662,6 +829,12 @@ int main() {
     tests.push_back(TestCase{"close_flow_generates_fin_ack_and_close_event", test_close_flow_generates_fin_ack_and_close_event});
     tests.push_back(TestCase{"incoming_rst_clears_flow", test_incoming_rst_clears_flow});
     tests.push_back(TestCase{"invalid_ack_resets_existing_flow", test_invalid_ack_resets_existing_flow});
+    tests.push_back(TestCase{"c_api_create_validates_arguments", test_c_api_create_validates_arguments});
+    tests.push_back(TestCase{"c_api_destroy_accepts_null", test_c_api_destroy_accepts_null});
+    tests.push_back(TestCase{"c_api_handle_incoming_ip_packet_completes_handshake", test_c_api_handle_incoming_ip_packet_completes_handshake});
+    tests.push_back(TestCase{"c_api_send_downstream_payload_generates_data_segment", test_c_api_send_downstream_payload_generates_data_segment});
+    tests.push_back(TestCase{"c_api_close_flow_generates_fin_ack_and_close_event", test_c_api_close_flow_generates_fin_ack_and_close_event});
+    tests.push_back(TestCase{"c_api_rejects_null_instance_and_connection_info", test_c_api_rejects_null_instance_and_connection_info});
     append_checksum_tests(&tests);
 
     for (std::size_t i = 0; i < tests.size(); ++i) {
@@ -677,4 +850,3 @@ int main() {
     std::cout << tests.size() << " tests passed" << std::endl;
     return 0;
 }
-
