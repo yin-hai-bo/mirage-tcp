@@ -1,4 +1,5 @@
 #include "ipv4_packet.h"
+#include "mirage_tcp/error_code.h"
 
 #include <cassert>
 #include <cstring>
@@ -43,61 +44,61 @@ uint16_t internet_checksum(const uint8_t* data, size_t size) {
 
 }  // namespace
 
-error_code_t parse_ipv4_tcp_packet(
+mirage_tcp_error_code_t parse_ipv4_tcp_packet(
     const void* packet,
     size_t packet_size,
     Ip4PacketView& result)
 {
     if (packet_size < sizeof(Ip4Head)) {
-        return ErrorCode::PacketTooShort;
+        return MTE_PacketTooShort;
     }
 
     Ip4Head head;
     std::memcpy(&head, packet, sizeof(head));
 
     if (head.version() != Ip4Head::VERSION) {
-        return ErrorCode::UnsupportedIpVersion;
+        return MTE_UnsupportedIpVersion;
     }
 
     if (!head.is_tcp()) {
-        return ErrorCode::IsNotTcp;
+        return MTE_IsNotTcp;
     }
 
     const size_t header_size = head.header_length();
     if (header_size < sizeof(Ip4Head)) {
-        return ErrorCode::InvalidIpv4HeaderLength;
+        return MTE_InvalidIpv4HeaderLength;
     }
 
     const uint16_t total_length = ntohs(head.total_length);
     if (total_length < header_size || total_length > packet_size) {
-        return ErrorCode::InvalidIpv4TotalLength;
+        return MTE_InvalidIpv4TotalLength;
     }
 
     const uint16_t flags_and_fragment = ntohs(head.flags_fragment_offset);
     if ((flags_and_fragment & 0x1fffU) != 0U) {
-        return ErrorCode::Ipv4FragmentUnsupported;
+        return MTE_Ipv4FragmentUnsupported;
     }
 
     result.set(
         head,
         static_cast<const uint8_t*>(packet) + header_size,
         total_length - header_size);
-    return ErrorCode::Ok;
+    return MTE_Ok;
 }
 
-error_code_t serialize_ipv4_packet(
+mirage_tcp_error_code_t serialize_ipv4_packet(
     const Ip4Head& head,
     const void* payload,
     size_t payload_size,
     std::vector<uint8_t>* bytes) {
     if (bytes == NULL) {
-        return ErrorCode::InvalidArgument;
+        return MTE_InvalidArgument;
     }
 
     const size_t header_size = sizeof(Ip4Head);
     const size_t total_size = header_size + payload_size;
     if (total_size > 0xffffU) {
-        return ErrorCode::PacketTooLarge;
+        return MTE_PacketTooLarge;
     }
 
     std::vector<uint8_t> serialized_bytes(total_size, 0);
@@ -114,7 +115,7 @@ error_code_t serialize_ipv4_packet(
     }
 
     *bytes = serialized_bytes;
-    return ErrorCode::Ok;
+    return MTE_Ok;
 }
 
 }  // namespace mirage_tcp

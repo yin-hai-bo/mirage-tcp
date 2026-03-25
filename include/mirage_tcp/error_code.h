@@ -1,55 +1,56 @@
 #ifndef MIRAGE_TCP_ERROR_CODE_H
 #define MIRAGE_TCP_ERROR_CODE_H
 
-namespace mirage_tcp {
+#ifdef __cplusplus
+extern "C" {
+#endif
 
-using error_code_t = int;
-
-struct ErrorCode {
-    enum Value {
-        Ok = 0,
-        InvalidArgument = 1,
-        PacketTooShort = 2,
-        UnsupportedIpVersion = 3,
-        InvalidIpv4HeaderLength = 4,
-        InvalidIpv4TotalLength = 5,
-        Ipv4FragmentUnsupported = 6,
-        PacketTooLarge = 7,
-        IsNotTcp = 8,
-        InvalidTcpDataOffset = 9,
-        TcpHeaderTooLong = 10,
-        HandshakeFinalAckExpected = 11,
-        HandshakeClientSequenceUnexpected = 12,
-        FlowNotFound = 13,
-        FlowAlreadyExists = 14,
-        EstablishedAckRequired = 15,
-        EstablishedAckNumberUnexpected = 16,
-        EstablishedSequenceUnexpected = 17,
-        CloseFinalAckExpected = 18,
-        CloseAckUnexpected = 19,
-        PayloadEmpty = 20,
-        Ipv4OnlyOperation = 21,
-        SendBeforeEstablished = 22,
-        CloseBeforeEstablished = 23,
-        PacketEmitFailed = 24,
-        ConnectInvalidState = 25,
-        WriteInvalidState = 26,
-        WriteAfterClose = 27,
-        CloseInvalidState = 28,
-        PeerMismatch = 29,
-        ClosedState = 30,
-        UnhandledState = 31,
-        SynAckExpected = 32,
-        AckUnexpected = 33,
-        PayloadOutOfOrder = 34,
-        FinSequenceUnexpected = 35,
-        ClosedByReset = 36,
-        ClosedByPeerFin = 37,
-        TimeWaitExpired = 38,
-        Unsupported = 39
-    };
+enum {
+    MTE_Ok = 0,
+    MTE_InvalidArgument = 1,
+    MTE_PacketTooShort = 2,
+    MTE_UnsupportedIpVersion = 3,
+    MTE_InvalidIpv4HeaderLength = 4,
+    MTE_InvalidIpv4TotalLength = 5,
+    MTE_Ipv4FragmentUnsupported = 6,
+    MTE_PacketTooLarge = 7,
+    MTE_IsNotTcp = 8,
+    MTE_InvalidTcpDataOffset = 9,
+    MTE_TcpHeaderTooLong = 10,
+    MTE_HandshakeFinalAckExpected = 11,
+    MTE_HandshakeClientSequenceUnexpected = 12,
+    MTE_FlowNotFound = 13,
+    MTE_FlowAlreadyExists = 14,
+    MTE_EstablishedAckRequired = 15,
+    MTE_EstablishedAckNumberUnexpected = 16,
+    MTE_EstablishedSequenceUnexpected = 17,
+    MTE_CloseFinalAckExpected = 18,
+    MTE_CloseAckUnexpected = 19,
+    MTE_PayloadEmpty = 20,
+    MTE_Ipv4OnlyOperation = 21,
+    MTE_SendBeforeEstablished = 22,
+    MTE_CloseBeforeEstablished = 23,
+    MTE_PacketEmitFailed = 24,
+    MTE_ConnectInvalidState = 25,
+    MTE_WriteInvalidState = 26,
+    MTE_WriteAfterClose = 27,
+    MTE_CloseInvalidState = 28,
+    MTE_PeerMismatch = 29,
+    MTE_ClosedState = 30,
+    MTE_UnhandledState = 31,
+    MTE_SynAckExpected = 32,
+    MTE_AckUnexpected = 33,
+    MTE_PayloadOutOfOrder = 34,
+    MTE_FinSequenceUnexpected = 35,
+    MTE_ClosedByReset = 36,
+    MTE_ClosedByPeerFin = 37,
+    MTE_TimeWaitExpired = 38,
+    MTE_Unsupported = 39,
+    MTE_OutOfMemory = 40,
 };
 
-}  // namespace mirage_tcp
+#ifdef __cplusplus
+}
+#endif
 
 #endif

@@ -6,6 +6,7 @@
 
 #include <vector>
 
+#include "mirage_tcp/defines.h"
 #include "mirage_tcp/error_code.h"
 
 namespace mirage_tcp {
@@ -81,7 +82,7 @@ struct TcpSegment {
  * @param out_segment Output segment structure on success.
  * @return 0 if parsing succeeds; otherwise an error code.
  */
-error_code_t parse_tcp_segment(
+mirage_tcp_error_code_t parse_tcp_segment(
     const void* bytes,
     size_t byte_count,
     TcpSegment& out_segment);

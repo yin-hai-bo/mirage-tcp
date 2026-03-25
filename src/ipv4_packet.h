@@ -12,7 +12,7 @@
 #include <netinet/in.h>
 #endif
 
-#include "mirage_tcp/error_code.h"
+#include "mirage_tcp/defines.h"
 #include "ip4_head.h"
 
 namespace mirage_tcp {
@@ -59,7 +59,7 @@ struct Ip4PacketView {
  * @param parsed_packet Output packet view on success.
  * @return 0 if parsing succeeds as IPv4/TCP; otherwise an error code.
  */
-error_code_t parse_ipv4_tcp_packet(
+mirage_tcp_error_code_t parse_ipv4_tcp_packet(
     const void* packet,
     size_t packet_size,
     Ip4PacketView& parsed_packet);
@@ -73,7 +73,7 @@ error_code_t parse_ipv4_tcp_packet(
  * @param bytes Output serialized IPv4 packet bytes on success.
  * @return 0 if serialization succeeds; otherwise an error code.
  */
-error_code_t serialize_ipv4_packet(
+mirage_tcp_error_code_t serialize_ipv4_packet(
     const Ip4Head& head,
     const void* payload,
     size_t payload_size,

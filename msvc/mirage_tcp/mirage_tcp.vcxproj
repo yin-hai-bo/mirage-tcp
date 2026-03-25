@@ -28,9 +28,12 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\..\include\mirage_tcp\connection_info.h" />
+    <ClInclude Include="..\..\include\mirage_tcp\defines.h" />
     <ClInclude Include="..\..\include\mirage_tcp\error_code.h" />
     <ClInclude Include="..\..\include\mirage_tcp\mirage_tcp.h" />
+    <ClInclude Include="..\..\include\mirage_tcp\mirage_tcp.hpp" />
     <ClInclude Include="..\..\src\checksum.h" />
+    <ClInclude Include="..\..\src\connection_info.hpp" />
     <ClInclude Include="..\..\src\constants.h" />
     <ClInclude Include="..\..\src\ip4_head.h" />
     <ClInclude Include="..\..\src\ip6_head.h" />

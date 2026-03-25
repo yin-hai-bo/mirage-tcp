@@ -3,7 +3,7 @@
 #include <iostream>
 #include <vector>
 
-#include "mirage_tcp/mirage_tcp.h"
+#include "mirage_tcp/mirage_tcp.hpp"
 
 namespace {
 
@@ -18,12 +18,12 @@ void on_downstream_ip_packet_generated(void* user_data, const void* ip_packet, s
     context->last_packet.assign(bytes, bytes + static_cast<std::ptrdiff_t>(ip_packet_size));
 }
 
-void on_tcp_handshake_completed(void* user_data, const mirage_tcp::ConnectionInfo&) {
+void on_tcp_handshake_completed(void* user_data, const mirage_tcp_connection_info_t *) {
     DemoContext* context = static_cast<DemoContext*>(user_data);
     context->handshake_completed = true;
 }
 
-void on_tcp_connection_reset(void*, const mirage_tcp::ConnectionInfo&) {
+void on_tcp_connection_reset(void*, const mirage_tcp_connection_info_t *) {
     std::cout << "flow reset by MirageTcp" << std::endl;
 }
 
@@ -33,7 +33,7 @@ int main() {
     DemoContext context;
     context.handshake_completed = false;
 
-    mirage_tcp::MirageTcpCallbacks callbacks;
+    mirage_tcp_callbacks_t callbacks = {};
     callbacks.user_data = &context;
     callbacks.on_downstream_ip_packet_generated = on_downstream_ip_packet_generated;
     callbacks.on_tcp_handshake_completed = on_tcp_handshake_completed;

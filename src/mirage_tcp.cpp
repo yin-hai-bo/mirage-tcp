@@ -1,5 +1,7 @@
+#include "mirage_tcp/mirage_tcp.hpp"
+
 #include "checksum.h"
-#include "mirage_tcp/mirage_tcp.h"
+#include "connection_info.hpp"
 #include "ip6_head.h"
 #include "ipv4_packet.h"
 #include "tcp_head.h"
@@ -10,6 +12,7 @@
 #include <cstring>
 #include <type_traits>
 #include <unordered_map>
+
 namespace mirage_tcp {
 
 namespace {
@@ -88,37 +91,29 @@ void serialize_tcp_segment_with_checksum(
     write_u16_be(checksum, target + offsetof(TcpHead, checksum));
 }
 
-error_code_t parse_ipv6_tcp_packet(const void* packet, size_t packet_size) {
+mirage_tcp_error_code_t parse_ipv6_tcp_packet(const void* packet, size_t packet_size) {
     if (packet == NULL) {
-        return ErrorCode::InvalidArgument;
+        return MTE_InvalidArgument;
     }
 
     if (packet_size == 0) {
-        return ErrorCode::InvalidArgument;
+        return MTE_InvalidArgument;
     }
 
     const uint8_t* bytes = static_cast<const uint8_t*>(packet);
     const uint8_t version = static_cast<uint8_t>(bytes[0] >> 4);
     if (version != Ip6Head::VERSION) {
-        return ErrorCode::UnsupportedIpVersion;
+        return MTE_UnsupportedIpVersion;
     }
 
-    return ErrorCode::Unsupported;
+    return MTE_Unsupported;
 }
 
 }  // namespace
 
-MirageTcpCallbacks::MirageTcpCallbacks()
-    : user_data(NULL),
-      on_downstream_ip_packet_generated(NULL),
-      on_tcp_handshake_completed(NULL),
-      on_tcp_payload_received(NULL),
-      on_tcp_connection_closed(NULL),
-      on_tcp_connection_reset(NULL) {}
-
 class MirageTcp::Impl {
 public:
-    Impl(const MirageTcpCallbacks& callbacks)
+    Impl(const mirage_tcp_callbacks_t & callbacks)
         : callbacks_(callbacks)
     {}
 
@@ -130,87 +125,87 @@ public:
      * @param ip_packet_size Size of @p ip_packet in bytes.
      * @return 0 if the packet is accepted; otherwise an error code.
      */
-    error_code_t handle_incoming_ip_packet(const void* ip_packet, size_t ip_packet_size) {
+    mirage_tcp_error_code_t handle_incoming_ip_packet(const void* ip_packet, size_t ip_packet_size) {
         if (ip_packet == nullptr) {
-            return ErrorCode::InvalidArgument;
+            return MTE_InvalidArgument;
         }
         assert(reinterpret_cast<std::uintptr_t>(ip_packet) % alignof(Ip6Head) == 0U);
 
         Ip4PacketView ipv4_packet;
-        const error_code_t ipv4_parse_result = parse_ipv4_tcp_packet(ip_packet, ip_packet_size, ipv4_packet);
-        if (ipv4_parse_result == ErrorCode::Ok) {
+        const mirage_tcp_error_code_t ipv4_parse_result = parse_ipv4_tcp_packet(ip_packet, ip_packet_size, ipv4_packet);
+        if (ipv4_parse_result == MTE_Ok) {
             return handle_incoming_ip4_tcp_packet(ipv4_packet);
         }
 
-        if (ipv4_parse_result == ErrorCode::UnsupportedIpVersion) {
+        if (ipv4_parse_result == MTE_UnsupportedIpVersion) {
             return parse_ipv6_tcp_packet(ip_packet, ip_packet_size);
         }
         return ipv4_parse_result;
     }
 
-    error_code_t send_downstream_tcp_payload(
+    mirage_tcp_error_code_t send_downstream_tcp_payload(
         const ConnectionInfo& connection_info,
         const void* payload,
         size_t payload_size)
     {
         if (payload == nullptr || payload_size == 0) {
-            return ErrorCode::PayloadEmpty;
+            return MTE_PayloadEmpty;
         }
 
         if (connection_info.ip_ver != 4) {
-            return ErrorCode::Ipv4OnlyOperation;
+            return MTE_Ipv4OnlyOperation;
         }
 
         FlowMap::iterator it = ipv4_flows_.find(connection_info);
         if (it == ipv4_flows_.end()) {
-            return ErrorCode::FlowNotFound;
+            return MTE_FlowNotFound;
         }
 
         if (it->second.state != FlowState::Established) {
-            return ErrorCode::SendBeforeEstablished;
+            return MTE_SendBeforeEstablished;
         }
 
         Flow* const flow = &it->second;
-        const error_code_t emit_result = emit_tcp_response(
+        const mirage_tcp_error_code_t emit_result = emit_tcp_response(
                 flow->connection_info,
                 flow->server_next_sequence,
                 flow->client_next_sequence,
                 TcpSegment::FlagsBuilder().set_ack().flags(),
                 payload,
                 payload_size);
-        if (emit_result != ErrorCode::Ok) {
+        if (emit_result != MTE_Ok) {
             return emit_result;
         }
         flow->server_next_sequence += static_cast<uint32_t>(payload_size);
-        return ErrorCode::Ok;
+        return MTE_Ok;
     }
 
-    error_code_t close_flow(const ConnectionInfo& connection_info) {
+    mirage_tcp_error_code_t close_flow(const ConnectionInfo& connection_info) {
         if (connection_info.ip_ver != 4) {
-            return ErrorCode::Ipv4OnlyOperation;
+            return MTE_Ipv4OnlyOperation;
         }
 
         FlowMap::iterator it = ipv4_flows_.find(connection_info);
         if (it == ipv4_flows_.end()) {
-            return ErrorCode::FlowNotFound;
+            return MTE_FlowNotFound;
         }
 
         if (it->second.state != FlowState::Established) {
-            return ErrorCode::CloseBeforeEstablished;
+            return MTE_CloseBeforeEstablished;
         }
 
         Flow& flow = it->second;
-        const error_code_t emit_result = emit_tcp_response(
+        const mirage_tcp_error_code_t emit_result = emit_tcp_response(
                 flow.connection_info,
                 flow.server_next_sequence,
                 flow.client_next_sequence,
                 TcpSegment::FlagsBuilder().set_ack().set_fin().flags());
-        if (emit_result != ErrorCode::Ok) {
+        if (emit_result != MTE_Ok) {
             return emit_result;
         }
         flow.server_next_sequence += 1;
         flow.state = FlowState::LastAck;
-        return ErrorCode::Ok;
+        return MTE_Ok;
     }
 
 
@@ -240,18 +235,20 @@ private:
 
     using FlowMap = std::unordered_map<ConnectionInfo, Flow, ConnectionInfoHash, ConnectionInfoEqual>;
 
-    error_code_t handle_incoming_ip4_tcp_packet(const Ip4PacketView & ipv4_packet) {
+    mirage_tcp_error_code_t handle_incoming_ip4_tcp_packet(const Ip4PacketView & ipv4_packet) {
         TcpSegment tcp_segment;
-        const error_code_t tcp_parse_result = parse_tcp_segment(ipv4_packet.payload, ipv4_packet.payload_size, tcp_segment);
-        if (tcp_parse_result != ErrorCode::Ok) {
+        const mirage_tcp_error_code_t tcp_parse_result = parse_tcp_segment(ipv4_packet.payload, ipv4_packet.payload_size, tcp_segment);
+        if (tcp_parse_result != MTE_Ok) {
             return tcp_parse_result;
         }
 
-        const ConnectionInfo key(
-            ipv4_packet.source_address,
-            ipv4_packet.destination_address,
+        ConnectionInfo key;
+        mirage_tcp_set_connection_info_v4(
+            &ipv4_packet.source_address,
+            &ipv4_packet.destination_address,
             tcp_segment.source_port,
-            tcp_segment.destination_port);
+            tcp_segment.destination_port,
+            &key);
 
         if (tcp_segment.is_syn() && !tcp_segment.is_ack()) {
             return handle_syn(key, tcp_segment.sequence_number);
@@ -260,12 +257,12 @@ private:
         FlowMap::iterator it = ipv4_flows_.find(key);
         if (it == ipv4_flows_.end()) {
             if (tcp_segment.is_rst()) {
-                return ErrorCode::Ok;
+                return MTE_Ok;
             }
             emit_reset_for_unhandled_packet(
                 key,
                 tcp_segment);
-            return ErrorCode::FlowNotFound;
+            return MTE_FlowNotFound;
         }
 
         Flow& flow = it->second;
@@ -273,30 +270,30 @@ private:
             const ConnectionInfo reset_flow = flow.connection_info;
             ipv4_flows_.erase(it);
             emit_reset(reset_flow);
-            return ErrorCode::Ok;
+            return MTE_Ok;
         }
 
         if (flow.state == FlowState::SynReceived) {
             if (!tcp_segment.is_ack() || tcp_segment.acknowledgment_number != flow.server_next_sequence) {
                 return fail_flow(
                     flow.connection_info,
-                    ErrorCode::HandshakeFinalAckExpected,
+                    MTE_HandshakeFinalAckExpected,
                     tcp_segment);
             }
 
             if (tcp_segment.sequence_number != flow.client_next_sequence) {
                 return fail_flow(
                     flow.connection_info,
-                    ErrorCode::HandshakeClientSequenceUnexpected,
+                    MTE_HandshakeClientSequenceUnexpected,
                     tcp_segment);
             }
 
             flow.state = FlowState::Established;
             const auto cb = callbacks_.on_tcp_handshake_completed;
             if (cb) {
-                cb(callbacks_.user_data, flow.connection_info);
+                cb(callbacks_.user_data, &flow.connection_info);
             }
-            return ErrorCode::Ok;
+            return MTE_Ok;
         }
 
         if (flow.state == FlowState::Established) {
@@ -315,14 +312,14 @@ private:
         }
     }
 
-    void emit_reset(const ConnectionInfo& connection_info) const {
+    void emit_reset(const ConnectionInfo & connection_info) const {
         const auto cb = callbacks_.on_tcp_connection_reset;
         if (cb) {
-            cb(callbacks_.user_data, connection_info);
+            cb(callbacks_.user_data, &connection_info);
         }
     }
 
-    error_code_t handle_syn(const ConnectionInfo& connection_info, uint32_t client_sequence) {
+    mirage_tcp_error_code_t handle_syn(const ConnectionInfo& connection_info, uint32_t client_sequence) {
         const uint32_t client_next_sequence = client_sequence + 1;
         // Keep the server ISN deterministic so packet-level tests can assert
         // exact sequence behavior without relying on a random source.
@@ -337,50 +334,50 @@ private:
         const auto inserted =
             ipv4_flows_.insert(std::make_pair(connection_info, flow));
         if (!inserted.second) {
-            return ErrorCode::FlowAlreadyExists;
+            return MTE_FlowAlreadyExists;
         }
 
-        const error_code_t emit_result = emit_tcp_response(
+        const mirage_tcp_error_code_t emit_result = emit_tcp_response(
                 connection_info,
                 server_sequence_for_syn_ack,
                 client_next_sequence,
                 TcpSegment::FlagsBuilder().set_syn().set_ack().flags());
-        if (emit_result != ErrorCode::Ok) {
+        if (emit_result != MTE_Ok) {
             ipv4_flows_.erase(connection_info);
             return emit_result;
         }
 
-        return ErrorCode::Ok;
+        return MTE_Ok;
     }
 
-    error_code_t handle_established_packet(
+    mirage_tcp_error_code_t handle_established_packet(
         Flow& flow,
         const TcpSegment& segment) {
         if (segment.is_rst()) {
             const ConnectionInfo reset_flow = flow.connection_info;
             ipv4_flows_.erase(reset_flow);
             emit_reset(reset_flow);
-            return ErrorCode::Ok;
+            return MTE_Ok;
         }
 
         if (!segment.is_ack()) {
             return fail_flow(
                 flow.connection_info,
-                ErrorCode::EstablishedAckRequired,
+                MTE_EstablishedAckRequired,
                 segment);
         }
 
         if (segment.acknowledgment_number != flow.server_next_sequence) {
             return fail_flow(
                 flow.connection_info,
-                ErrorCode::EstablishedAckNumberUnexpected,
+                MTE_EstablishedAckNumberUnexpected,
                 segment);
         }
 
         if (segment.sequence_number != flow.client_next_sequence) {
             return fail_flow(
                 flow.connection_info,
-                ErrorCode::EstablishedSequenceUnexpected,
+                MTE_EstablishedSequenceUnexpected,
                 segment);
         }
 
@@ -390,7 +387,7 @@ private:
             if (cb) {
                 cb(
                     callbacks_.user_data,
-                    flow.connection_info,
+                    &flow.connection_info,
                     &segment.payload[0],
                     segment.payload.size());
             }
@@ -404,33 +401,33 @@ private:
         if (segment.is_fin()) {
             flow.client_next_sequence += 1;
             flow.state = FlowState::LastAck;
-            const error_code_t emit_result = emit_tcp_response(
+            const mirage_tcp_error_code_t emit_result = emit_tcp_response(
                     flow.connection_info,
                     flow.server_next_sequence,
                     flow.client_next_sequence,
                     TcpSegment::FlagsBuilder().set_ack().set_fin().flags());
-            if (emit_result != ErrorCode::Ok) {
+            if (emit_result != MTE_Ok) {
                 return emit_result;
             }
             flow.server_next_sequence += 1;
-            return ErrorCode::Ok;
+            return MTE_Ok;
         }
 
-        return ErrorCode::Ok;
+        return MTE_Ok;
     }
 
-    error_code_t handle_last_ack_packet(const Flow& flow, const TcpSegment& segment) {
+    mirage_tcp_error_code_t handle_last_ack_packet(const Flow& flow, const TcpSegment& segment) {
         if (!segment.is_ack()) {
             return fail_flow(
                 flow.connection_info,
-                ErrorCode::CloseFinalAckExpected,
+                MTE_CloseFinalAckExpected,
                 segment);
         }
 
         if (segment.acknowledgment_number != flow.server_next_sequence) {
             return fail_flow(
                 flow.connection_info,
-                ErrorCode::CloseAckUnexpected,
+                MTE_CloseAckUnexpected,
                 segment);
         }
 
@@ -438,12 +435,12 @@ private:
         ipv4_flows_.erase(completed_flow);
         const auto cb = callbacks_.on_tcp_connection_closed;
         if (cb) {
-            cb(callbacks_.user_data, completed_flow);
+            cb(callbacks_.user_data, &completed_flow);
         }
-        return ErrorCode::Ok;
+        return MTE_Ok;
     }
 
-    error_code_t emit_reset_for_unhandled_packet(
+    mirage_tcp_error_code_t emit_reset_for_unhandled_packet(
         const ConnectionInfo& connection_info,
         const TcpSegment& segment) {
         if (segment.flags & TcpSegment::BITS_MASK_ACK) {
@@ -469,9 +466,9 @@ private:
             TcpSegment::FlagsBuilder().set_ack().set_rst().flags());
     }
 
-    error_code_t fail_flow(
+    mirage_tcp_error_code_t fail_flow(
         const ConnectionInfo& connection_info,
-        error_code_t error_code,
+        mirage_tcp_error_code_t error_code,
         const TcpSegment& segment) {
         ipv4_flows_.erase(connection_info);
         emit_reset_for_unhandled_packet(
@@ -481,7 +478,7 @@ private:
         return error_code;
     }
 
-    error_code_t emit_tcp_response(
+    mirage_tcp_error_code_t emit_tcp_response(
         const ConnectionInfo & connection_info,
         uint32_t sequence_number,
         uint32_t acknowledgment_number,
@@ -490,7 +487,7 @@ private:
         return emit_tcp_response(connection_info, sequence_number, acknowledgment_number, flags, nullptr, 0);
     }
 
-    error_code_t emit_tcp_response(
+    mirage_tcp_error_code_t emit_tcp_response(
         const ConnectionInfo& connection_info,
         uint32_t sequence_number,
         uint32_t acknowledgment_number,
@@ -502,13 +499,13 @@ private:
         const size_t tcp_size = serialized_tcp_segment_size(payload_size);
         const size_t packet_size = ipv4_header_size + tcp_size;
         if (packet_size > PacketBufferPool::BUFFER_CAPACITY) {
-            return ErrorCode::PacketEmitFailed;
+            return MTE_PacketEmitFailed;
         }
 
         PacketBufferLease packet_buffer(packet_buffer_pool_);
         uint8_t* const packet_bytes = packet_buffer.data();
         if (packet_bytes == nullptr) {
-            return ErrorCode::PacketEmitFailed;
+            return MTE_PacketEmitFailed;
         }
 
         Ip4Head head = {};
@@ -532,38 +529,30 @@ private:
             packet_bytes + ipv4_header_size);
 
         emit_downstream_ip_packet(packet_bytes, packet_size);
-        return ErrorCode::Ok;
+        return MTE_Ok;
     }
 
 private:
-    MirageTcpCallbacks callbacks_;
+    mirage_tcp_callbacks_t callbacks_;
     FlowMap ipv4_flows_;
     PacketBufferPool packet_buffer_pool_;
 };
 
-MirageTcp::MirageTcp(const MirageTcpCallbacks& callbacks)
+MirageTcp::MirageTcp(const mirage_tcp_callbacks_t & callbacks)
     : impl_(new Impl(callbacks))
 {}
 
-MirageTcp::MirageTcp(MirageTcp && other)
-    : impl_(std::move(other.impl_))
-{}
+ MirageTcp::MirageTcp(MirageTcp &&) = default;
 
-MirageTcp & MirageTcp::operator=(MirageTcp && rv) {
-    if (this != &rv) {
-        this->impl_.reset();
-        std::swap(this->impl_, rv.impl_);
-    }
-    return *this;
-}
+ MirageTcp & MirageTcp::operator=(MirageTcp &&) = default;
 
 MirageTcp::~MirageTcp() = default;
 
-error_code_t MirageTcp::handle_incoming_ip_packet(const void* ip_packet, size_t ip_packet_size) {
+mirage_tcp_error_code_t MirageTcp::handle_incoming_ip_packet(const void* ip_packet, size_t ip_packet_size) {
     return impl_->handle_incoming_ip_packet(ip_packet, ip_packet_size);
 }
 
-error_code_t MirageTcp::send_downstream_tcp_payload(
+mirage_tcp_error_code_t MirageTcp::send_downstream_tcp_payload(
     const ConnectionInfo& connection_info,
     const void* payload,
     size_t payload_size)
@@ -571,8 +560,60 @@ error_code_t MirageTcp::send_downstream_tcp_payload(
     return impl_->send_downstream_tcp_payload(connection_info, payload, payload_size);
 }
 
-error_code_t MirageTcp::close_flow(const ConnectionInfo& connection_info) {
+mirage_tcp_error_code_t MirageTcp::close_flow(const ConnectionInfo& connection_info) {
     return impl_->close_flow(connection_info);
 }
 
 }  // namespace mirage_tcp
+
+extern "C" {
+
+mirage_tcp_error_code_t mirage_tcp_create(mirage_tcp_callbacks_t const * callbacks, mirage_tcp_object * result) {
+    if (!callbacks || !result) {
+        return MTE_InvalidArgument;
+    }
+    *result = nullptr;
+    try {
+        auto const instance = new mirage_tcp::MirageTcp(*callbacks);
+        *result = reinterpret_cast<mirage_tcp_object>(instance);
+        return MTE_Ok;
+    } catch (const std::bad_alloc &) {
+        return MTE_OutOfMemory;
+    }
+}
+
+ void mirage_tcp_destroy(mirage_tcp_object instance) {
+    delete reinterpret_cast<mirage_tcp::MirageTcp *>(instance);
+}
+
+mirage_tcp_error_code_t mirage_tcp_handle_incoming_ip_packet(
+    mirage_tcp_object instance,
+    const void * ip_packet,
+    size_t ip_packet_size)         
+{
+    return reinterpret_cast<mirage_tcp::MirageTcp *>(instance)
+        ->handle_incoming_ip_packet(ip_packet, ip_packet_size);
+}
+
+mirage_tcp_error_code_t mirage_tcp_send_downstream_tcp_payload(
+    mirage_tcp_object instance,
+    const mirage_tcp_connection_info_t * connection_info,
+    const void * payload,
+    size_t payload_size)         
+{
+    return reinterpret_cast<mirage_tcp::MirageTcp *>(instance)
+        ->send_downstream_tcp_payload(
+            *connection_info,
+            payload,
+            payload_size);
+}
+
+mirage_tcp_error_code_t mirage_tcp_close_flow(
+    mirage_tcp_object instance,
+    const mirage_tcp_connection_info_t * connection_info)
+{
+    return reinterpret_cast<mirage_tcp::MirageTcp *>(instance)
+        ->close_flow(*connection_info);
+}
+
+}

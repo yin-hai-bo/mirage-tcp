@@ -45,13 +45,13 @@ TcpSegment::TcpSegment()
       flags(0)
 {}
 
-error_code_t parse_tcp_segment(
+mirage_tcp_error_code_t parse_tcp_segment(
     const void* bytes,
     size_t byte_count,
     TcpSegment& out_segment)
 {
     if (byte_count < sizeof(TcpHead)) {
-        return ErrorCode::PacketTooShort;
+        return MTE_PacketTooShort;
     }
 
     const uint8_t* raw_bytes = static_cast<const uint8_t*>(bytes);
@@ -61,11 +61,11 @@ error_code_t parse_tcp_segment(
 
     const size_t header_length = tcp_head.head_size();
     if (header_length < sizeof(TcpHead)) {
-        return ErrorCode::InvalidTcpDataOffset;
+        return MTE_InvalidTcpDataOffset;
     }
 
     if (header_length > byte_count) {
-        return ErrorCode::TcpHeaderTooLong;
+        return MTE_TcpHeaderTooLong;
     }
 
     out_segment.source_port = ntohs(tcp_head.source_port);
@@ -78,7 +78,7 @@ error_code_t parse_tcp_segment(
     out_segment.payload.assign(
         raw_bytes + static_cast<std::ptrdiff_t>(header_length),
         raw_bytes + static_cast<std::ptrdiff_t>(byte_count));
-    return ErrorCode::Ok;
+    return MTE_Ok;
 }
 
 std::vector<uint8_t> serialize_tcp_segment(const TcpSegment& segment) {

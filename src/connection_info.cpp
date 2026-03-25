@@ -1,46 +1,54 @@
-#include "mirage_tcp/connection_info.h"
+#include "connection_info.hpp"
 
 #include <cstring>
+#include <type_traits>
 
-namespace mirage_tcp {
+using mirage_tcp::ConnectionInfo;
 
-namespace {
+static_assert(std::is_standard_layout<mirage_tcp_address_t>::value, "mirage_tcp_address_t must be standard-layout");
+static_assert(std::is_trivially_copyable<mirage_tcp_address_t>::value, "mirage_tcp_address_t must be trivially copyable");
+static_assert(std::is_standard_layout<ConnectionInfo>::value, "ConnectionInfo must be standard-layout");
+static_assert(std::is_trivially_copyable<ConnectionInfo>::value, "ConnectionInfo must be trivially copyable");
 
-ConnectionInfo::Address make_ipv4_address_storage(const in_addr& address) {
-    ConnectionInfo::Address value = {};
-    value.ipv4 = address;
-    return value;
+extern "C" {
+
+static void set_connection_info(
+    uint8_t ip_ver,
+    uint16_t client_port,
+    uint16_t server_port,
+    ConnectionInfo * target)
+{
+    std::memset(target, 0, sizeof(*target));
+    target->client_port = client_port;
+    target->server_port = server_port;
+    target->ip_ver = ip_ver;
 }
 
-ConnectionInfo::Address make_ipv6_address_storage(const in6_addr& address) {
-    ConnectionInfo::Address value = {};
-    value.ipv6 = address;
-    return value;
+void mirage_tcp_set_connection_info_v4(
+    const struct in_addr * client_ipv4,
+    const struct in_addr * server_ipv4,
+    uint16_t client_port,
+    uint16_t server_port,
+    ConnectionInfo * target)
+{
+    set_connection_info(4, client_port, server_port, target);
+    target->client_ip.ipv4.s_addr = client_ipv4->s_addr;
+    target->server_ip.ipv4.s_addr = server_ipv4->s_addr;
 }
 
-}  // namespace
+void mirage_tcp_set_connection_info_v6(
+    const struct in6_addr * client_ipv6,
+    const struct in6_addr * server_ipv6,
+    uint16_t client_port,
+    uint16_t server_port,
+    ConnectionInfo * target)
+{
+    set_connection_info(6, client_port, server_port, target);
+    std::memcpy(&target->client_ip.ipv6, client_ipv6, sizeof(in6_addr));
+    std::memcpy(&target->server_ip.ipv6, server_ipv6, sizeof(in6_addr));
+}
 
-ConnectionInfo::ConnectionInfo(
-    const in_addr& client_ipv4,
-    const in_addr& server_ipv4,
-    uint16_t client_port_value,
-    uint16_t server_port_value)
-    : client_ip(make_ipv4_address_storage(client_ipv4)),
-      server_ip(make_ipv4_address_storage(server_ipv4)),
-      client_port(client_port_value),
-      server_port(server_port_value),
-      ip_ver(4) {}
-
-ConnectionInfo::ConnectionInfo(
-    const in6_addr& client_ipv6,
-    const in6_addr& server_ipv6,
-    uint16_t client_port_value,
-    uint16_t server_port_value)
-    : client_ip(make_ipv6_address_storage(client_ipv6)),
-      server_ip(make_ipv6_address_storage(server_ipv6)),
-      client_port(client_port_value),
-      server_port(server_port_value),
-      ip_ver(6) {}
+} // extern "C"
 
 bool operator<(const ConnectionInfo& left, const ConnectionInfo& right) {
     if (left.ip_ver != right.ip_ver) {
@@ -73,8 +81,10 @@ bool operator<(const ConnectionInfo& left, const ConnectionInfo& right) {
 }
 
 bool operator==(const ConnectionInfo& left, const ConnectionInfo& right) {
-    return ConnectionInfoEqual()(left, right);
+    return mirage_tcp::ConnectionInfoEqual()(left, right);
 }
+
+namespace mirage_tcp {
 
 size_t ConnectionInfoHash::operator()(const ConnectionInfo& connection_info) const {
     const uint32_t ports =
