@@ -386,7 +386,10 @@ private:
                 segment);
         }
 
-        if (!segment.payload.empty()) {
+        const bool has_payload = !segment.payload.empty();
+        const bool has_fin = segment.is_fin();
+
+        if (has_payload) {
             flow.client_next_sequence += static_cast<uint32_t>(segment.payload.size());
             const auto cb = callbacks_.on_tcp_payload_received;
             if (cb) {
@@ -396,14 +399,9 @@ private:
                     &segment.payload[0],
                     segment.payload.size());
             }
-            return emit_tcp_response(
-                flow.connection_info,
-                flow.server_next_sequence,
-                flow.client_next_sequence,
-                TcpSegment::FlagsBuilder().set_ack().flags());
         }
 
-        if (segment.is_fin()) {
+        if (has_fin) {
             flow.client_next_sequence += 1;
             flow.state = FlowState::LastAck;
             const mirage_tcp_error_code_t emit_result = emit_tcp_response(
@@ -416,6 +414,14 @@ private:
             }
             flow.server_next_sequence += 1;
             return MTE_Ok;
+        }
+
+        if (has_payload) {
+            return emit_tcp_response(
+                flow.connection_info,
+                flow.server_next_sequence,
+                flow.client_next_sequence,
+                TcpSegment::FlagsBuilder().set_ack().flags());
         }
 
         return MTE_Ok;

@@ -13,7 +13,7 @@
 | ID | 优先级 | 状态 | 摘要 |
 | --- | --- | --- | --- |
 | KD-001 | P1 | Resolved | 第三次握手 `ACK` 携带 `payload` 时，数据被静默丢弃 |
-| KD-002 | P1 | Open | 已建立连接收到 `payload + FIN` 组合段时，`FIN` 被忽略 |
+| KD-002 | P1 | Resolved | 已建立连接收到 `payload + FIN` 组合段时，`FIN` 被忽略 |
 | KD-003 | P1 | Open | `LastAck` 状态未校验对端 `sequence_number` |
 | KD-004 | P2 | Open | `IPv4 fragment` 只检查了 fragment offset，未检查 `MF` 标志 |
 | KD-005 | P2 | Open | Debug 下对入站包地址对齐做 `assert`，可能中止合法调用 |
@@ -54,6 +54,8 @@
 
 优先级：`P1`
 
+状态：`Resolved`
+
 位置：
 
 - [`src/mirage_tcp.cpp:353`](C:/dev/MirageTCP/src/mirage_tcp.cpp#L353)
@@ -77,9 +79,15 @@
 - 在同一个 segment 内同时处理 payload 长度与 `FIN`
 - `ACK` 号需要同时覆盖 payload 长度和 `FIN` 占用的一个序号
 
-测试缺口：
+当前分支处理结果：
 
-- 当前测试只覆盖了“纯 payload”和“纯 FIN”，没有覆盖“`payload + FIN`”组合段
+- `handle_established_packet()` 现在先处理同包 `payload`，再继续处理同包 `FIN`
+- 返回给对端的单个响应包会同时带 `ACK + FIN`
+- `acknowledgment_number` 会同时覆盖 payload 长度和 `FIN` 消耗的一个序号
+
+测试覆盖：
+
+- 已补“`payload + FIN`”组合段的 packet-level 测试
 
 ## KD-003 `LastAck` 状态未校验对端 `sequence_number`
 
@@ -193,7 +201,6 @@
 
 ## 建议修复顺序
 
-1. 先修 `KD-001` 与 `KD-002`
-2. 再修 `KD-003`
-3. 然后修 `KD-004` 与 `KD-005`
-4. 每修一项同时补一个最小 packet-level 测试
+1. 先修 `KD-003`
+2. 然后修 `KD-004` 与 `KD-005`
+3. 每修一项同时补一个最小 packet-level 测试
